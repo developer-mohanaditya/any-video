@@ -258,15 +258,28 @@ object MediaApi {
         return MediaCandidate(
             url = url,
             fileName = name,
-            // An audio file is not its own thumbnail: leave it null so the card shows the
-            // platform mark instead of an image that can never load.
-            thumbnailUrl = thumbnail ?: if (isVideo || audioOnly) null else url,
+            // YouTube exposes a stable poster for every video id. Without this the resolver
+            // reply has no thumb and every YouTube card showed only the platform mark.
+            thumbnailUrl = thumbnail ?: if (isYouTube(pageUrl)) {
+                youTubeThumbnail(pageUrl)
+            } else if (isVideo || audioOnly) {
+                null
+            } else {
+                url
+            },
             isVideo = !audioOnly && (isVideo || extension in VIDEO_EXTENSIONS),
             sourceUrl = pageUrl,
             // Tunnel URLs are self-authorising; a redirect points at the origin CDN. Sending the
             // instance key to either would leak it, so downloads carry no API credentials.
             headers = emptyMap(),
         )
+    }
+
+    /** The public YouTube poster for a watch, Shorts, live or youtu.be link. */
+    internal fun youTubeThumbnail(pageUrl: String): String? {
+        if (!isYouTube(pageUrl)) return null
+        val id = idFor(pageUrl) ?: return null
+        return "https://i.ytimg.com/vi/$id/hqdefault.jpg"
     }
 
     /**

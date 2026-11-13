@@ -2,6 +2,7 @@ package io.anyvideo.downloader
 
 import io.anyvideo.downloader.data.FileNames
 import io.anyvideo.downloader.net.Instagram
+import io.anyvideo.downloader.net.MediaApi
 import io.anyvideo.downloader.net.Resolver
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -25,6 +26,19 @@ class CoreLogicTest {
         val name = FileNames.build(null, "12345", "jpg")
         assertTrue(name.startsWith("User-___12345___-"))
         assertEquals("12345", FileNames.parse(name).second)
+    }
+
+    @Test
+    fun `youtube preview thumbnail is derived from every video link shape`() {
+        assertEquals(
+            "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+            MediaApi.youTubeThumbnail("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        )
+        assertEquals(
+            "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+            MediaApi.youTubeThumbnail("https://youtu.be/dQw4w9WgXcQ?si=abc"),
+        )
+        assertNull(MediaApi.youTubeThumbnail("https://www.youtube.com/"))
     }
 
     @Test

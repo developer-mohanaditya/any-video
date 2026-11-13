@@ -106,11 +106,15 @@ object Library {
                     val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                     var found = false
                     while (cursor.moveToNext()) {
+                        val uri = Uri.withAppendedPath(collection, cursor.getLong(idColumn).toString())
                         val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE))
-                        if (size <= 0L) continue
+                        if (size <= 0L) {
+                            // A zero-byte row blocks a fresh insert and shows as an empty tile.
+                            runCatching { context.contentResolver.delete(uri, null, null) }
+                            continue
+                        }
                         // A row can outlive its file, and a stale row must not make the app think
                         // this download already happened. Only count a row that can be opened.
-                        val uri = Uri.withAppendedPath(collection, cursor.getLong(idColumn).toString())
                         if (canOpen(context, uri)) {
                             found = true
                         } else {
@@ -129,6 +133,7 @@ object Library {
             relativePath.substringAfter('/', "anyvideo"),
         )
         val file = File(folder, fileName)
+        if (file.exists() && file.length() <= 0L) file.delete()
         return file.exists() && file.length() > 0L
     }
 

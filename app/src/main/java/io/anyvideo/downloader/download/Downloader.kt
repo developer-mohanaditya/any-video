@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
@@ -184,52 +185,24 @@ object Downloader {
         headers: Map<String, String>,
         viaProxy: Boolean,
     ) {
-        var temp: File? = null
         try {
             update(task.id) { it.copy(state = State.RUNNING) }
-            val request = Request.Builder().url(task.url).apply {
-                headers.forEach { (key, value) -> header(key, value) }
-            }.build()
-
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IllegalStateException("HTTP ${response.code}")
-                }
-                val body = response.body ?: throw IllegalStateException("Empty reply")
-                val total = body.contentLength().coerceAtLeast(0L)
-                update(task.id) { it.copy(total = total) }
-                val dir = File(context.cacheDir, "downloads").apply { mkdirs() }
-                temp = File(dir, "${task.id}-${task.fileName}")
-                body.byteStream().use { input ->
-                    temp!!.outputStream().use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var received = 0L
-                        var lastEmit = 0L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            output.write(buffer, 0, read)
-                            received += read
-                            val now = System.currentTimeMillis()
-                            if (now - lastEmit > 120 || (total > 0 && received == total)) {
-                                lastEmit = now
-                                update(task.id) { it.copy(received = received) }
-                            }
-                        }
-                    }
-                }
-                val size = temp!!.length()
-                if (size <= 0L) throw IllegalStateException("Empty file")
-                if (looksLikeErrorPage(temp!!)) {
-                    throw IllegalStateException("The server sent a web page instead of the file")
-                }
-                publish(context, task, temp!!)
+            val downloaded = downloadTo(
+                url = task.url,
+                headers = headers,
+                cacheDir = File(context.cacheDir, "downloads"),
+                fileName = task.fileName,
+                onProgress = { received, total ->
+                    update(task.id) { it.copy(received = received, total = total) }
+                },
+                publishFile = { file -> publish(context, task, file) },
+            )
+            // Finish with the bytes that actually reached disk, not a missing content length.
+            update(task.id) {
+                it.copy(state = State.DONE, received = downloaded, total = downloaded, error = null)
             }
-            update(task.id) { it.copy(state = State.DONE, received = it.total, error = null) }
-            temp?.delete()
             synchronized(inFlight) { inFlight.remove("${task.relativePath}/${task.fileName}") }
         } catch (t: Throwable) {
-            temp?.delete()
             val message = t.message ?: "Download failed"
             val proxy = Prefs.fallbackProxy.trim()
             // A failed CDN request gets one retry through the configured proxy, without the
@@ -259,24 +232,87 @@ object Downloader {
         }
     }
 
+    /**
+     * The real network-to-gallery path: fetch into a temp file, reject an empty or error-page
+     * body, then hand a nonempty file to the publisher. Exposed for the zero-byte regression test.
+     */
+    internal suspend fun downloadTo(
+        url: String,
+        headers: Map<String, String>,
+        cacheDir: File,
+        fileName: String,
+        onProgress: (received: Long, total: Long) -> Unit = { _, _ -> },
+        publishFile: (File) -> Unit,
+    ): Long = withContext(Dispatchers.IO) {
+        val dir = cacheDir.apply { mkdirs() }
+        val temp = File(dir, "download-${System.nanoTime()}-$fileName")
+        try {
+            val request = Request.Builder().url(url).apply {
+                headers.forEach { (key, value) -> header(key, value) }
+            }.build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IllegalStateException("HTTP ${response.code}")
+                }
+                val body = response.body ?: throw IllegalStateException("Empty reply")
+                // Tunnel replies often send no Content-Length, only the resolver's estimate.
+                // Using that keeps the progress bar and the final size honest for YouTube.
+                val total = body.contentLength().takeIf { it > 0L }
+                    ?: response.header("Estimated-Content-Length")?.toLongOrNull()
+                        ?.takeIf { it > 0L }
+                    ?: 0L
+                onProgress(0L, total)
+                temp.outputStream().use { output ->
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        var received = 0L
+                        var lastEmit = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            output.write(buffer, 0, read)
+                            received += read
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmit > 120 || (total > 0 && received == total)) {
+                                lastEmit = now
+                                onProgress(received, total)
+                            }
+                        }
+                    }
+                }
+            }
+            requirePayload(temp)
+            val size = temp.length()
+            publishFile(temp)
+            size
+        } finally {
+            temp.delete()
+        }
+    }
+
     /** Inserts the finished file into the gallery, or writes it to the public folder before Q. */
-    private fun publish(context: Context, task: Task, file: File) {
+    private fun publish(context: Context, task: Task, file: File, attempt: Int = 0) {
         val resolver = context.contentResolver
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // A stale row can outlive its file and survive a failed delete, especially after a
+            // reinstall. Recheck now, and avoid a name that any row still occupies, including
+            // one whose file cannot be opened, before inserting the pending row.
+            if (Library.exists(context, task.relativePath, task.fileName)) return
             val collection = when {
                 task.isVideo -> MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 task.mime?.startsWith("audio/") == true ->
                     MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 else -> MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             }
+            val targetName = availableName(resolver, collection, task.relativePath, task.fileName)
             val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, task.fileName)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, targetName)
                 task.mime?.let { put(MediaStore.MediaColumns.MIME_TYPE, it) }
                 put(MediaStore.MediaColumns.RELATIVE_PATH, task.relativePath)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
-            val uri = resolver.insert(collection, values)
-                ?: throw IllegalStateException("Could not create the file")
+            val uri = insertPending(resolver, collection, values, targetName)
             try {
                 val output = resolver.openOutputStream(uri)
                     ?: throw IllegalStateException("Could not write the file")
@@ -289,6 +325,10 @@ object Downloader {
                 if (written <= 0L) throw IllegalStateException("The file did not reach storage")
             } catch (t: Throwable) {
                 runCatching { resolver.delete(uri, null, null) }
+                if (attempt < 5 && t.message.orEmpty().contains("UNIQUE", ignoreCase = true)) {
+                    publish(context, task.copy(fileName = numberedName(task.fileName, attempt + 2)), file, attempt + 1)
+                    return
+                }
                 throw t
             }
         } else {
@@ -308,8 +348,75 @@ object Downloader {
         }
     }
 
+    /**
+     * A row can remain at the requested path even after its file is gone, and Android can refuse
+     * to delete it. Never fail the download over that: add a suffix until MediaStore accepts it.
+     */
+    private fun insertPending(
+        resolver: android.content.ContentResolver,
+        collection: Uri,
+        values: ContentValues,
+        fileName: String,
+    ): Uri {
+        var candidate = fileName
+        for (attempt in 1..20) {
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, candidate)
+            try {
+                return resolver.insert(collection, values)
+                    ?: throw IllegalStateException("Could not create the file")
+            } catch (t: RuntimeException) {
+                val unique = t.message.orEmpty().contains("UNIQUE", ignoreCase = true)
+                if (!unique || attempt == 20) throw t
+                candidate = numberedName(fileName, attempt + 1)
+            }
+        }
+        throw IllegalStateException("Could not create the file")
+    }
+
+    /** A name for a new row that no stale row or pending row already occupies. */
+    private fun availableName(
+        resolver: android.content.ContentResolver,
+        collection: Uri,
+        relativePath: String,
+        fileName: String,
+    ): String {
+        for (attempt in 1..20) {
+            val candidate = if (attempt == 1) fileName else numberedName(fileName, attempt)
+            val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND " +
+                "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+            val taken = runCatching {
+                resolver.query(
+                    collection,
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    selection,
+                    arrayOf("$relativePath%", candidate),
+                    null,
+                )?.use { it.count > 0 } ?: false
+            }.getOrDefault(false)
+            if (!taken) return candidate
+        }
+        return numberedName(fileName, System.currentTimeMillis().toInt())
+    }
+
+    internal fun numberedName(fileName: String, number: Int): String {
+        val dot = fileName.lastIndexOf('.')
+        if (dot <= 0) return "$fileName ($number)"
+        return "${fileName.substring(0, dot)} ($number)${fileName.substring(dot)}"
+    }
+
     private fun update(id: Long, change: (Task) -> Task) {
         _tasks.value = _tasks.value.map { if (it.id == id) change(it) else it }
+    }
+
+    /**
+     * The last gate before MediaStore. A tunnel can answer 200 with no body, and a CDN refusing
+     * a private file can answer with a login page; neither may become a gallery file.
+     */
+    internal fun requirePayload(file: File) {
+        if (file.length() <= 0L) throw IllegalStateException("Empty file")
+        if (looksLikeErrorPage(file)) {
+            throw IllegalStateException("The server sent a web page instead of the file")
+        }
     }
 
     /** A CDN refusing a private file can answer 200 with a login page; never publish that. */
