@@ -96,6 +96,18 @@ object Resolver {
     }
 
     private suspend fun lookup(activity: Activity, rawUrl: String, url: String): ResolveOutcome {
+        // Cobalt does not handle story links, so resolve those directly before asking the API
+        // and getting its "link unsupported" answer.
+        if (Instagram.isInstagram(url)) {
+            Instagram.storyTarget(url)?.let { target ->
+                val story = Instagram.resolveStory(activity, url, target)
+                if (story.items.isNotEmpty()) {
+                    return ResolveOutcome(story.items, "Resolved from Instagram stories")
+                }
+                return ResolveOutcome(emptyList(), story.note ?: "No media found in that story.")
+            }
+        }
+
         // The resolver API is the widest net (Instagram, YouTube, X, Pinterest, …), so it goes
         // first; its failure reason is kept in case the on-device paths find nothing either.
         var apiError: String? = null

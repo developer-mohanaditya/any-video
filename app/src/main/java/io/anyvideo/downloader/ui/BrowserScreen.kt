@@ -28,9 +28,65 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
+/**
+ * Clicks Instagram's "Decline optional cookies" button once React has rendered it. The banner
+ * is present in the DOM but clipped, so a real tap can never reach it. The interval gives a slow
+ * first paint a few seconds and then gives up without touching normal pages.
+ */
+private const val DISMISS_COOKIE_SHEET = """
+(function () {
+  var tries = 0;
+  var timer = setInterval(function () {
+    var buttons = document.querySelectorAll('button');
+    for (var i = 0; i < buttons.length; i++) {
+      if (/decline optional cookies/i.test(buttons[i].innerText || '')) {
+        buttons[i].click();
+        clearInterval(timer);
+        return;
+      }
+    }
+    if (++tries > 20) clearInterval(timer);
+  }, 400);
+})();
+"""
+
 private const val MOBILE_UA =
     "Mozilla/5.0 (Linux; Android 14; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/124.0.0.0 Mobile Safari/537.36"
+
+/**
+ * Instagram's login page builds its form inside wrappers that report zero height with overflow
+ * clipping. The form is fully laid out, but the clip removes it from both painting and hit
+ * testing, so the page looks black and taps reach nothing. Growing every zero-height wrapper to
+ * the viewport height restores the real form. The interval catches wrappers React replaces while
+ * the page settles.
+ */
+private const val REVEAL_CLIPPED_LOGIN_FORM = """
+(function () {
+  function expand(el) {
+    el.style.setProperty('height', window.innerHeight + 'px', 'important');
+    el.style.setProperty('min-height', window.innerHeight + 'px', 'important');
+    el.style.setProperty('overflow', 'visible', 'important');
+  }
+  function fix() {
+    var input = document.querySelector('input[name="username"]');
+    if (!input) return;
+    expand(document.documentElement);
+    expand(document.body);
+    var el = input;
+    while (el && el !== document.body) {
+      if (el.getBoundingClientRect().height < 10) expand(el);
+      el = el.parentElement;
+    }
+  }
+  fix();
+  var tries = 0;
+  var timer = setInterval(function () {
+    fix();
+    if (++tries > 30) clearInterval(timer);
+  }, 300);
+})();
+"""
 
 /**
  * A plain browser. Its job is reading pages and, importantly, holding the Instagram login
@@ -106,6 +162,16 @@ fun BrowserScreen(startUrl: String = "https://www.instagram.com") {
                                 url?.let {
                                     currentUrl = it
                                     urlText = it
+                                    // Instagram's consent sheet lays out to zero height inside a
+                                    // WebView, leaving an invisible scrim that swallows every tap.
+                                    // Choosing essential-only cookies dismisses it and unblocks the
+                                    // page, and it is the choice that keeps tracking to a minimum.
+                                    if (it.contains("instagram.com")) {
+                                        view.evaluateJavascript(DISMISS_COOKIE_SHEET, null)
+                                    }
+                                    if (it.contains("instagram.com/accounts/login")) {
+                                        view.evaluateJavascript(REVEAL_CLIPPED_LOGIN_FORM, null)
+                                    }
                                 }
                             }
                         }

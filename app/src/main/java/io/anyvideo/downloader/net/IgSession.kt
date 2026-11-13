@@ -17,7 +17,9 @@ import org.json.JSONObject
  */
 object IgSession {
 
-    const val LOGIN_URL = "https://www.instagram.com/accounts/login/"
+    // Without the auth_switcher source Instagram redirects a mobile WebView to its phone-signup
+    // page instead of showing the username and password form.
+    const val LOGIN_URL = "https://www.instagram.com/accounts/login/?source=auth_switcher"
     private const val DOMAIN = "https://www.instagram.com"
 
     /** Last known display name, cached so Settings can render instantly. */

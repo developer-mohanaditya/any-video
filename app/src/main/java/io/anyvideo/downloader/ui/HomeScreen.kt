@@ -32,10 +32,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -135,6 +135,10 @@ fun HomeScreen(
     }
     /** True when the current card was already queued by the paste, so it needs no button. */
     var autoSaved by remember { mutableStateOf(false) }
+    /** Shows a check in the field's button for a moment after the gallery write finishes. */
+    var savedTick by remember { mutableStateOf(false) }
+    /** Set when this screen queued the current files, so an already-saved link does not tick. */
+    var waitingForGallery by remember { mutableStateOf(false) }
     var recent by remember { mutableStateOf(listOf<RecentProfile>()) }
     var pendingYouTube by remember { mutableStateOf<String?>(null) }
     /** The last link we acted on, so auto-save fires once per paste instead of on every keystroke. */
@@ -173,6 +177,7 @@ fun HomeScreen(
         hideKeyboard()
         loading = true
         message = null
+        waitingForGallery = false
         scope.launch {
             val found = ArrayList<MediaCandidate>()
             var note: String? = null
@@ -189,8 +194,9 @@ fun HomeScreen(
                 val queued = Downloader.enqueueAll(context, found)
                 results = found
                 autoSaved = queued > 0
+                if (queued > 0) waitingForGallery = true
                 message = when {
-                    queued > 0 -> "Saving $queued file(s) to Pictures, Movies or Music (anyvideo)."
+                    queued > 0 -> savingMessage(found)
                     found.isNotEmpty() -> "Already saved in your gallery."
                     else -> "Could not start the downloads."
                 }
@@ -279,6 +285,17 @@ fun HomeScreen(
         results.isNotEmpty() && results.all { Downloader.isSaved(context, it) }
     }
 
+    // Keyed only on allSaved: clearing the flag here must not restart this effect and cancel
+    // the delay, or the tick would stay on and the toast would never run.
+    LaunchedEffect(allSaved) {
+        if (!waitingForGallery || !allSaved) return@LaunchedEffect
+        waitingForGallery = false
+        savedTick = true
+        delay(1600)
+        savedTick = false
+        Toast.makeText(context, "Saved to gallery", Toast.LENGTH_SHORT).show()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -336,6 +353,7 @@ fun HomeScreen(
                     saved = allSaved,
                     onSave = {
                         val started = Downloader.enqueue(context, preview)
+                        if (started) waitingForGallery = true
                         Toast.makeText(
                             context,
                             if (started) "Download started" else "Already downloading or saved",
@@ -344,6 +362,7 @@ fun HomeScreen(
                     },
                     onSaveAll = {
                         val count = Downloader.enqueueAll(context, results)
+                        if (count > 0) waitingForGallery = true
                         Toast.makeText(
                             context,
                             if (count > 0) "Queued $count download(s)" else "Nothing new to download",
@@ -359,6 +378,7 @@ fun HomeScreen(
         PasteField(
             link = link,
             loading = loading,
+            saved = savedTick,
             onTextChange = { onTextChange(it) },
             onSubmit = { submit(link) },
             onPaste = {
@@ -408,8 +428,9 @@ private fun PreviewCard(
     val platform = Platform.of(sourceUrl)
     val context = LocalContext.current
     // A card only offers a button when nothing was queued: choosing a YouTube format already
-    // started the transfer, and every other platform auto-saves once its link resolves.
-    val needsAction = !queued
+    // started the transfer, and every other platform auto-saves once its link resolves. A file
+    // already in the gallery needs neither a button nor a permanent "saved" row.
+    val needsAction = !queued && !saved
     // The platform ratio is only a placeholder while the image loads; once the thumbnail is
     // decoded its own proportions win, so nothing is cropped at the top or bottom.
     var measuredRatio by remember(sourceUrl, candidate.thumbnailUrl) { mutableStateOf<Float?>(null) }
@@ -525,26 +546,7 @@ private fun PreviewCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (saved) {
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(38.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Saved to gallery",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else if (needsAction) {
+                if (needsAction) {
                     Spacer(Modifier.height(10.dp))
                     FilledTonalButton(
                         onClick = if (count > 1) onSaveAll else onSave,
@@ -698,6 +700,7 @@ private fun HeaderBrands() {
 private fun PasteField(
     link: String,
     loading: Boolean,
+    saved: Boolean,
     onTextChange: (String) -> Unit,
     onSubmit: () -> Unit,
     onPaste: () -> Unit,
@@ -720,19 +723,23 @@ private fun PasteField(
         },
         trailingIcon = {
             FilledIconButton(
-                onClick = onSubmit,
-                enabled = !loading && link.isNotBlank(),
+                onClick = { if (!saved) onSubmit() },
+                enabled = !loading && !saved && link.isNotBlank(),
                 modifier = Modifier.padding(end = 4.dp).size(42.dp),
                 shape = CircleShape,
             ) {
-                if (loading) {
-                    CircularProgressIndicator(
+                when {
+                    loading -> CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
-                } else {
-                    Icon(
+                    saved -> Icon(
+                        Icons.Filled.Check,
+                        contentDescription = "Saved to gallery",
+                        modifier = Modifier.size(22.dp),
+                    )
+                    else -> Icon(
                         Icons.Filled.Download,
                         contentDescription = "Download",
                         modifier = Modifier.size(20.dp),
@@ -745,6 +752,24 @@ private fun PasteField(
 
 /** An Instagram handle the user downloaded from before. */
 private data class RecentProfile(val label: String, val url: String)
+
+/** "Saving 2 pictures", "Saving 1 movie", or a mix when a carousel has several kinds. */
+private fun savingMessage(candidates: List<MediaCandidate>): String {
+    val pictures = candidates.count { !it.isVideo && !Downloader.isAudio(it.fileName) }
+    val movies = candidates.count { it.isVideo }
+    val music = candidates.count { Downloader.isAudio(it.fileName) }
+    val parts = buildList {
+        if (pictures > 0) add("$pictures ${if (pictures == 1) "picture" else "pictures"}")
+        if (movies > 0) add("$movies ${if (movies == 1) "movie" else "movies"}")
+        if (music > 0) add("$music ${if (music == 1) "music file" else "music files"}")
+    }
+    val described = when (parts.size) {
+        0 -> "files"
+        1 -> parts.first()
+        else -> parts.dropLast(1).joinToString(", ") + " and " + parts.last()
+    }
+    return "Saving $described"
+}
 
 private fun isYouTubeLink(url: String): Boolean =
     url.contains("youtube.com", true) || url.contains("youtu.be", true)

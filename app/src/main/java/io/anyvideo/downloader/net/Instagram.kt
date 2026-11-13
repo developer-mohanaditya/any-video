@@ -20,6 +20,8 @@ object Instagram {
 
     private val postRegex = Regex("instagram\\.com/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)")
     private val userRegex = Regex("instagram\\.com/([A-Za-z0-9._]{1,40})/?$")
+    private val storyRegex = Regex("""instagram\.com/stories/([A-Za-z0-9._]{1,40})(?:/(\d+))?/?""")
+    private val highlightRegex = Regex("""instagram\.com/stories/highlights/(\d+)""")
     private const val QUERY_HASH_TIMELINE = "44efc15d3c13342d02df0b5a9fa3d33f"
 
     fun isInstagram(url: String): Boolean = url.contains("instagram.com") || url.contains("instagr.am")
@@ -30,6 +32,26 @@ object Instagram {
         val candidate = userRegex.find(url.substringBefore('?'))?.groupValues?.getOrNull(1) ?: return null
         if (candidate in setOf("p", "reel", "reels", "tv", "stories", "explore", "accounts")) return null
         return candidate
+    }
+
+    /** A story URL names either a profile reel or a highlight reel. */
+    sealed interface StoryTarget {
+        data class Profile(val username: String, val mediaId: String? = null) : StoryTarget
+        data class Highlight(val id: String) : StoryTarget
+    }
+
+    fun storyTarget(url: String): StoryTarget? {
+        val clean = url.substringBefore('?').substringBefore('#')
+        highlightRegex.find(clean)?.let {
+            return StoryTarget.Highlight(it.groupValues[1])
+        }
+        val match = storyRegex.find(clean) ?: return null
+        val username = match.groupValues[1]
+        if (username == "highlights") return null
+        return StoryTarget.Profile(
+            username = username,
+            mediaId = match.groupValues[2].ifBlank { null },
+        )
     }
 
     /** Instagram media ids are the shortcode decoded from its URL-safe base64 alphabet. */
@@ -193,6 +215,136 @@ object Instagram {
                 headers = mediaHeaders(url, cookie),
             ),
         )
+    }
+
+    /**
+     * Resolves one story, every active story of a profile, or a highlight. The reel endpoints
+     * return the same item shape as posts, so the existing candidate parser handles the media.
+     */
+    suspend fun resolveStory(context: Context, url: String, target: StoryTarget): Feed {
+        val cookie = cookies()
+        if (cookie?.contains("sessionid=") != true) {
+            return Feed(
+                note = "Instagram stories need a signed-in session. Sign in from Settings, then try again.",
+                signedIn = false,
+            )
+        }
+
+        val reelId: String
+        val mediaId: String?
+        when (target) {
+            is StoryTarget.Highlight -> {
+                reelId = "highlight:${target.id}"
+                mediaId = null
+            }
+            is StoryTarget.Profile -> {
+                reelId = lookupUserId(context, target.username, cookie) ?: return Feed(
+                    note = "Instagram returned no profile for @${target.username}. Check the spelling, " +
+                        "or sign in again if the session expired.",
+                    signedIn = true,
+                )
+                mediaId = target.mediaId
+            }
+        }
+
+        val endpoints = if (target is StoryTarget.Highlight) {
+            listOf(reelsMedia(reelId))
+        } else {
+            // The per-user endpoint is the original app's story path; reels_media is the
+            // fallback for sessions where that path is unavailable.
+            listOf(
+                "https://i.instagram.com/api/v1/feed/user/$reelId/reel_media/",
+                reelsMedia(reelId),
+            )
+        }
+
+        var note: String? = null
+        for (endpoint in endpoints) {
+            val reply = withContext(Dispatchers.IO) {
+                Http.getReply(endpoint, igHeaders(context, cookie))
+            }
+            if (reply == null) {
+                note = "Could not reach Instagram. Check your connection and try again."
+                continue
+            }
+            if (!reply.isSuccess) {
+                note = storyStatusNote(reply.code)
+                continue
+            }
+            val body = reply.body.orEmpty()
+            apiBlock(body)?.let { return Feed(note = it, signedIn = true) }
+            val items = storyItems(body, reelId) ?: continue
+            val selected = if (mediaId == null) items else selectStory(items, mediaId)
+            if (selected == null || selected.length() == 0) {
+                note = "That story is no longer available. Stories disappear after 24 hours."
+                continue
+            }
+            val out = itemsToCandidates(selected, url, cookie)
+            if (out.isNotEmpty()) return Feed(out, signedIn = true)
+            note = "Instagram returned a story without a downloadable file."
+        }
+
+        return Feed(note = note ?: noStoryNote(target), signedIn = true)
+    }
+
+    private fun reelsMedia(reelId: String): String =
+        "https://i.instagram.com/api/v1/feed/reels_media/?reel_ids=$reelId"
+
+    private fun noStoryNote(target: StoryTarget): String = when (target) {
+        is StoryTarget.Highlight -> "That highlight is no longer available."
+        is StoryTarget.Profile -> if (target.mediaId != null) {
+            "That story is no longer available. Stories disappear after 24 hours."
+        } else {
+            "@${target.username} has no active stories right now."
+        }
+    }
+
+    private suspend fun lookupUserId(context: Context, username: String, cookie: String?): String? {
+        val reply = withContext(Dispatchers.IO) {
+            Http.getReply(
+                "https://i.instagram.com/api/v1/users/web_profile_info/?username=$username",
+                igHeaders(context, cookie),
+            )
+        } ?: return null
+        if (!reply.isSuccess) return null
+        return runCatching {
+            JSONObject(reply.body.orEmpty())
+                .getJSONObject("data").getJSONObject("user")
+                .optString("id").ifBlank { null }
+        }.getOrNull()
+    }
+
+    /** The story endpoints put their items at the root, or inside a `reels` object. */
+    private fun storyItems(body: String, reelId: String): JSONArray? {
+        val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        root.optJSONArray("items")?.takeIf { it.length() > 0 }?.let { return it }
+        val reels = root.optJSONObject("reels") ?: return null
+        reels.optJSONObject(reelId)?.optJSONArray("items")
+            ?.takeIf { it.length() > 0 }?.let { return it }
+        val keys = reels.keys()
+        while (keys.hasNext()) {
+            val items = reels.optJSONObject(keys.next())?.optJSONArray("items") ?: continue
+            if (items.length() > 0) return items
+        }
+        return null
+    }
+
+    private fun selectStory(items: JSONArray, mediaId: String): JSONArray? {
+        val selected = JSONArray()
+        for (i in 0 until items.length()) {
+            val item = items.optJSONObject(i) ?: continue
+            val id = item.optString("id").substringBefore('_')
+            if (id == mediaId || item.optString("pk") == mediaId) selected.put(item)
+        }
+        return selected.takeIf { it.length() > 0 }
+    }
+
+    private fun storyStatusNote(code: Int): String = when {
+        code == 429 -> "Instagram is rate-limiting this account. Wait a few minutes before loading again."
+        code == 401 || code == 403 || code == 404 ->
+            "Instagram would not return that story for this session. Check that you follow the " +
+                "account, then sign in again if the session expired."
+        else -> "Instagram answered $code. Try again in a minute."
     }
 
     /**

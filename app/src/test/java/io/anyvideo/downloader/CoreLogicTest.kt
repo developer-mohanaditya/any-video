@@ -51,6 +51,33 @@ class CoreLogicTest {
     }
 
     @Test
+    fun `story links distinguish one story, a profile tray and a highlight`() {
+        assertEquals(
+            Instagram.StoryTarget.Profile("some.profile", "3344556677"),
+            Instagram.storyTarget("https://www.instagram.com/stories/some.profile/3344556677/?igsh=abc"),
+        )
+        assertEquals(
+            Instagram.StoryTarget.Profile("some.profile"),
+            Instagram.storyTarget("https://www.instagram.com/stories/some.profile/"),
+        )
+        assertEquals(
+            Instagram.StoryTarget.Highlight("17880160963012870"),
+            Instagram.storyTarget("https://www.instagram.com/stories/highlights/17880160963012870/"),
+        )
+        assertNull(Instagram.storyTarget("https://www.instagram.com/some.profile/"))
+    }
+
+    @Test
+    fun `story normalisation keeps the story path and drops tracking`() {
+        assertEquals(
+            "https://www.instagram.com/stories/some.profile/3344556677/",
+            Resolver.normalize(
+                "https://www.instagram.com/stories/some.profile/3344556677/?igsh=abc",
+            ),
+        )
+    }
+
+    @Test
     fun `profile username is not mistaken for a post route`() {
         assertEquals("some.profile", Instagram.usernameFrom("https://www.instagram.com/some.profile/?hl=en"))
         assertNull(Instagram.usernameFrom("https://www.instagram.com/p/C1a2B3c4/"))
