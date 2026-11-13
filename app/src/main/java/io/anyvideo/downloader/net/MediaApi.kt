@@ -236,7 +236,9 @@ object MediaApi {
             ?: if (audioOnly) audioExtensionFor(Prefs.youtubeAudioFormat)
             else if (isVideo) "mp4" else "jpg"
         val user = userFor(pageUrl)
-        val id = idFor(pageUrl) ?: System.currentTimeMillis().toString()
+        // A link whose id cannot be parsed still gets a stable name, so resolving it twice does
+        // not look like two different files.
+        val id = idFor(pageUrl) ?: Integer.toHexString(pageUrl.hashCode())
         val suffix = if (index > 0) "${id}_$index" else id
         // YouTube hands back the real video title, which is far more useful in the gallery than
         // an opaque video id. The id stays as a short suffix: two different videos can share a
@@ -290,8 +292,20 @@ object MediaApi {
             "",
         ).trim().trimEnd('.')
         val finalName = withoutQuality.ifEmpty { cleaned }
-        val shortened = if (finalName.length > 100) finalName.take(100).trimEnd() else finalName
-        return "$shortened.$extension"
+        // Gallery names are bytes, not characters: 100 emoji or CJK characters can pass 255
+        // bytes once the id suffix is added, and MediaStore then refuses the file.
+        return "${clampTitle(finalName)}.$extension"
+    }
+
+    /** Keeps a title within the byte budget a gallery entry can hold, without splitting a glyph. */
+    private fun clampTitle(title: String, maxBytes: Int = 170): String {
+        if (title.toByteArray(Charsets.UTF_8).size <= maxBytes) return title
+        var end = title.length
+        while (end > 0 && title.substring(0, end).toByteArray(Charsets.UTF_8).size > maxBytes) {
+            end--
+            if (end > 0 && title[end - 1].isLowSurrogate()) end--
+        }
+        return title.substring(0, end).trimEnd()
     }
 
     /** cobalt's `audioFormat` values mapped to the extension the file really has. */
@@ -340,9 +354,11 @@ object MediaApi {
         val path = pageUrl.substringBefore('?').substringBefore('#')
         return when {
             host.contains("instagram") -> Instagram.shortcode(pageUrl)
-            host.contains("youtu.be") -> path.substringAfterLast('/').takeIf { it.isNotBlank() }
-            host.contains("youtube") -> Regex("[?&]v=([A-Za-z0-9_-]{6,})").find(pageUrl)?.groupValues?.get(1)
-                ?: path.substringAfter("/shorts/", "").substringBefore('/').takeIf { it.isNotBlank() }
+            // youtu.be links, watch?v= links, Shorts, live and embed pages all carry the same
+            // eleven character id, including when the share link ends in a slash.
+            host.contains("youtu.be") || host.contains("youtube") ->
+                Regex("""(?:[?&]v=|/shorts/|/live/|/embed/|youtu\.be/)([A-Za-z0-9_-]{6,})""")
+                    .find(pageUrl)?.groupValues?.get(1)
             host.contains("twitter") || host == "x.com" -> Regex("/status/(\\d+)").find(path)?.groupValues?.get(1)
             host.contains("pinterest") -> Regex("/pin/(\\d+)").find(path)?.groupValues?.get(1)
             host.contains("tiktok") -> Regex("/video/(\\d+)").find(path)?.groupValues?.get(1)
