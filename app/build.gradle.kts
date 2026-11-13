@@ -8,15 +8,39 @@ plugins {
 }
 
 /**
- * Release signing comes from `keystore.properties` (never committed). Without it the release
- * build falls back to the debug key so `assembleRelease` still produces something installable
- * for testing; a real store upload must use your own keystore.
+ * Release signing comes from `keystore.properties` (never committed). A release without it is
+ * refused outright: Android only replaces an installed app when the signature matches, so an APK
+ * signed with any other key would strand every user on the version they already have.
  */
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
         FileInputStream(keystorePropertiesFile).use { load(it) }
     }
+}
+
+/** Fails a release build before anything is packaged, and leaves debug builds alone. */
+fun requireReleaseKeystore() {
+    if (keystorePropertiesFile.exists()) return
+    throw GradleException(
+        "Release signing is not configured. Create ${keystorePropertiesFile.path} from " +
+            "keystore.properties.example and point storeFile at the project keystore. " +
+            "A release signed with a different key cannot update an installed copy, so this " +
+            "build stops here. Use assembleDebug for a local build with the debug key.",
+    )
+}
+
+if (gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }) {
+    requireReleaseKeystore()
+}
+
+gradle.taskGraph.whenReady {
+    val buildingRelease = allTasks.any { task ->
+        task.name.contains("Release", ignoreCase = true) &&
+            (task.name.startsWith("assemble") || task.name.startsWith("bundle") ||
+                task.name.startsWith("package") || task.name.startsWith("install"))
+    }
+    if (buildingRelease) requireReleaseKeystore()
 }
 
 /**
@@ -61,16 +85,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Updates replace the installed app only when the key stays the same, so a release
-            // signed with the debug key is a dead end once people have installed it.
+            // requireReleaseKeystore() above stops the build when this is null.
             signingConfig = signingConfigs.findByName("release")
-                ?: run {
-                    logger.warn(
-                        "AnyVideo: keystore.properties is missing, so this release is signed " +
-                            "with the debug key. Do not publish it.",
-                    )
-                    signingConfigs.getByName("debug")
-                }
         }
     }
 

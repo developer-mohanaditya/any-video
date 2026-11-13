@@ -26,7 +26,8 @@ Release APKs are signed with the project key in `keystore/anyvideo-release.jks`,
 `keystore.properties` at the repository root. Both files are gitignored and must stay out of git.
 Every published release must use this same key: Android only replaces an installed app when the
 signature matches, so a build signed another way cannot be installed as an update. Without
-`keystore.properties` the release falls back to the debug key, and that APK must not be published.
+`keystore.properties` a release build stops before packaging with a message pointing at
+`keystore.properties.example`. Debug builds are unaffected and still use the debug key.
 
 ## Git identity and publishing
 
