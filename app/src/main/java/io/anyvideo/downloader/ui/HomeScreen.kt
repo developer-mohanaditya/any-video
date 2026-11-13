@@ -57,6 +57,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -419,6 +421,7 @@ private fun PreviewCard(
                             painter = painterResource(platform.icon),
                             contentDescription = platform.label,
                             modifier = Modifier.size(15.dp),
+                            colorFilter = brandTint(platform),
                         )
                     }
                 }
@@ -534,6 +537,20 @@ private fun fallbackThumbnail(url: String): String? {
     return id?.takeIf { it.isNotBlank() }?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
 }
 
+/**
+ * TikTok and X are drawn in black, which disappears on a dark background. Tint just those two
+ * with the theme's text colour when the app is dark; the colourful marks stay untouched.
+ */
+@Composable
+private fun brandTint(platform: Platform): ColorFilter? {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (dark && (platform == Platform.TIKTOK || platform == Platform.X)) {
+        ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
+    } else {
+        null
+    }
+}
+
 /** Brand marks, evenly spread and centred. */
 @Composable
 private fun SupportedAppsRow() {
@@ -547,6 +564,7 @@ private fun SupportedAppsRow() {
                 painter = painterResource(platform.icon),
                 contentDescription = platform.label,
                 modifier = Modifier.size(26.dp),
+                colorFilter = brandTint(platform),
             )
         }
     }

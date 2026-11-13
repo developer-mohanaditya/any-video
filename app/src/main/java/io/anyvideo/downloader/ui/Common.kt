@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.sp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -278,8 +279,9 @@ fun ActiveDownloadStrip(tasks: List<io.anyvideo.downloader.download.Downloader.T
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    when (task.state) {
-                        io.anyvideo.downloader.download.Downloader.State.QUEUED -> "queued"
+                    when {
+                        task.state == io.anyvideo.downloader.download.Downloader.State.QUEUED -> "queued"
+                        task.total <= 0L -> formatBytes(task.received)
                         else -> "${(task.progress * 100).toInt()}%"
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -287,10 +289,16 @@ fun ActiveDownloadStrip(tasks: List<io.anyvideo.downloader.download.Downloader.T
                 )
             }
             if (task.state == io.anyvideo.downloader.download.Downloader.State.RUNNING) {
-                LinearProgressIndicator(
-                    progress = { task.progress },
-                    modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 3.dp),
-                )
+                if (task.total > 0L) {
+                    LinearProgressIndicator(
+                        progress = { task.progress },
+                        modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 3.dp),
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 3.dp),
+                    )
+                }
             }
         }
         if (active.size > 3) {
@@ -301,4 +309,14 @@ fun ActiveDownloadStrip(tasks: List<io.anyvideo.downloader.download.Downloader.T
             )
         }
     }
+}
+
+/** Sizes read best in the unit that keeps the number short: KB, then MB, then GB. */
+fun formatBytes(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024.0) return "${kb.roundToInt()} KB"
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return "${"%.1f".format(mb)} MB"
+    return "${"%.1f".format(mb / 1024.0)} GB"
 }

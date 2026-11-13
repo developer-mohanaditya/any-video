@@ -62,6 +62,8 @@ object Downloader {
                 state == State.DONE -> 1f
                 total > 0L -> (received.toFloat() / total).coerceIn(0f, 1f)
                 else -> 0f
+                // A tunnel often streams without a length. The row then shows the bytes
+                // received instead of a percentage that would sit at 100 from the start.
             }
     }
 
@@ -184,7 +186,8 @@ object Downloader {
                     throw IllegalStateException("HTTP ${response.code}")
                 }
                 val body = response.body ?: throw IllegalStateException("Empty reply")
-                val total = body.contentLength()
+                val total = body.contentLength().coerceAtLeast(0L)
+                update(task.id) { it.copy(total = total) }
                 val dir = File(context.cacheDir, "downloads").apply { mkdirs() }
                 temp = File(dir, "${task.id}-${task.fileName}")
                 body.byteStream().use { input ->
@@ -200,9 +203,7 @@ object Downloader {
                             val now = System.currentTimeMillis()
                             if (now - lastEmit > 120 || (total > 0 && received == total)) {
                                 lastEmit = now
-                                update(task.id) {
-                                    it.copy(received = received, total = if (total > 0) total else received)
-                                }
+                                update(task.id) { it.copy(received = received) }
                             }
                         }
                     }

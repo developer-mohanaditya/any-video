@@ -347,7 +347,7 @@ private fun MediaTile(
         }
 
         Text(
-            "${media.size / 1024} KB",
+            formatBytes(media.size),
             style = MaterialTheme.typography.labelSmall,
             color = Color.White,
             modifier = Modifier

@@ -112,7 +112,7 @@ fun SettingsScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Download notifications", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "Show the system download notification when a file finishes.",
+                            "Show a notification while a download runs and when it finishes.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
