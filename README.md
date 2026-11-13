@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.0.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.0-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.1.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.1-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-8.0_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 8.0 and newer" />
 
@@ -15,11 +15,11 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.3.0.apk`, about 1.6 MB.
+The installable file is `AnyVideo-1.3.1.apk`, about 1.6 MB.
 
-- Direct download: [AnyVideo-1.3.0.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.0.apk)
+- Direct download: [AnyVideo-1.3.1.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.1.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.3.0.apk](AnyVideo-1.3.0.apk)
+- Copy in the repository: [AnyVideo-1.3.1.apk](AnyVideo-1.3.1.apk)
 
 Android 8.0 or newer. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
