@@ -239,9 +239,20 @@ object MediaApi {
         val id = idFor(pageUrl) ?: System.currentTimeMillis().toString()
         val suffix = if (index > 0) "${id}_$index" else id
         // YouTube hands back the real video title, which is far more useful in the gallery than
-        // an opaque video id. Other services keep the original app's username-id convention.
-        val name = if (isYouTube(pageUrl)) titleFileName(apiName) ?: FileNames.build(user, suffix, extension)
-        else FileNames.build(user, suffix, extension)
+        // an opaque video id. The id stays as a short suffix: two different videos can share a
+        // title, and a title-only name made the second one look like it was already saved.
+        // Other services keep the original app's username-id convention.
+        val name = if (isYouTube(pageUrl)) {
+            val title = titleFileName(apiName)
+            if (title != null) {
+                val base = title.substringBeforeLast('.').ifBlank { title }
+                "$base [$id].${title.substringAfterLast('.')}"
+            } else {
+                FileNames.build(user, suffix, extension)
+            }
+        } else {
+            FileNames.build(user, suffix, extension)
+        }
         return MediaCandidate(
             url = url,
             fileName = name,
