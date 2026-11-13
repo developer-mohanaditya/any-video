@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -57,11 +58,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -72,6 +79,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import android.media.MediaMetadataRetriever
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import coil.request.ImageRequest
@@ -98,6 +106,24 @@ fun HomeScreen(
     val downloadTasks by Downloader.tasks.collectAsState()
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    val rootFocus = remember { FocusRequester() }
+
+    /** A pasted link or a started download should not leave the keyboard covering the result. */
+    fun hideKeyboard() {
+        focus.clearFocus(force = true)
+        // Moving focus to the screen itself detaches the text field's editor, which is what the
+        // IME actually listens to on Android 13 and newer.
+        runCatching { rootFocus.requestFocus() }
+        keyboard?.hide()
+        val window = activity?.window ?: return
+        activity.currentFocus?.clearFocus()
+        WindowInsetsControllerCompat(window, window.decorView)
+            .hide(WindowInsetsCompat.Type.ime())
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        imm?.hideSoftInputFromWindow(window.decorView.windowToken, 0)
+    }
 
     var link by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
@@ -120,6 +146,16 @@ fun HomeScreen(
         recent = instagramProfilesFrom(DownloadRegistry.recentSources(context, 40))
     }
 
+    // Auto-resolve happens in a coroutine, where hiding the keyboard can race the frame that
+    // shows the result. Doing it after that frame keeps the field from holding the IME open.
+    LaunchedEffect(loading) {
+        if (loading) {
+            withFrameNanos { }
+            delay(250)
+            hideKeyboard()
+        }
+    }
+
     /** Every supported link in the text, so a list of URLs queues in one go. */
     fun linksFrom(text: String): List<String> =
         text.split(Regex("\\s+"))
@@ -134,6 +170,7 @@ fun HomeScreen(
             return
         }
         if (activity == null) return
+        hideKeyboard()
         loading = true
         message = null
         scope.launch {
@@ -169,6 +206,7 @@ fun HomeScreen(
     /** Non-YouTube links download at once; YouTube opens the format sheet first. */
     fun submit(text: String) {
         val target = text.trim()
+        hideKeyboard()
         if (target.isBlank()) {
             message = "Paste a link first."
             return
@@ -228,6 +266,7 @@ fun HomeScreen(
                 Prefs.youtubeAudioBitrate = bitrate
                 pendingYouTube = null
                 handled = target
+                hideKeyboard()
                 fetch(target, auto = true)
             },
         )
@@ -240,7 +279,13 @@ fun HomeScreen(
         results.isNotEmpty() && results.all { Downloader.isSaved(context, it) }
     }
 
-    Column(modifier = Modifier.fillMaxSize().animateContentSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .animateContentSize()
+            .focusRequester(rootFocus)
+            .focusable(),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp, top = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -320,7 +365,10 @@ fun HomeScreen(
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                 val text = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }
                     ?.getItemAt(0)?.coerceToText(context)?.toString()
-                if (!text.isNullOrBlank()) onTextChange(text.substringBefore(' ').trim())
+                if (!text.isNullOrBlank()) {
+                    onTextChange(text.substringBefore(' ').trim())
+                    hideKeyboard()
+                }
             },
         )
 

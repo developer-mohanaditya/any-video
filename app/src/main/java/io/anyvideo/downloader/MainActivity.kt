@@ -13,10 +13,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
@@ -40,7 +38,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import io.anyvideo.downloader.ui.BrowserScreen
 import io.anyvideo.downloader.ui.BulkScreen
 import io.anyvideo.downloader.ui.CaptionScreen
@@ -210,24 +207,13 @@ private fun AppRootContent(
     Scaffold(
         bottomBar = {
             if (showTabs) {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.height(64.dp),
-                ) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     tabs.forEach { tab ->
                         NavigationBarItem(
                             selected = screen == tab.screen,
                             onClick = { screen = tab.screen },
-                            icon = {
-                                Icon(
-                                    tab.icon,
-                                    contentDescription = tab.label,
-                                    modifier = Modifier.size(21.dp),
-                                )
-                            },
-                            label = {
-                                Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
-                            },
+                            icon = { Icon(tab.icon, contentDescription = tab.label) },
+                            label = { Text(tab.label) },
                         )
                     }
                 }
