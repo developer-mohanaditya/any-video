@@ -1,0 +1,42 @@
+# --- Android / Gradle build output -----------------------------------------
+.gradle/
+build/
+app/build/
+.kotlin/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# --- Release signing: never commit -----------------------------------------
+keystore.properties
+*.jks
+*.keystore
+
+# --- Built packages ---------------------------------------------------------
+*.apk
+*.aab
+*.ap_
+*.idsig
+
+# --- Device / analysis artifacts --------------------------------------------
+# shots/ holds adb screencaps from manual testing; artifacts/ holds smoke-test output.
+shots/
+artifacts/
+/*.png
+*.log
+
+# --- Python harness ----------------------------------------------------------
+scripts/smoke-test/media/
+__pycache__/
+*.pyc
+
+# --- OS noise ----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# The APK distributed with the release is kept in the repository on purpose
+!AnyVideo-*.apk

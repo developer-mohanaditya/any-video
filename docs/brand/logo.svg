@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108" role="img" aria-label="AnyVideo">
+  <rect width="108" height="108" rx="24" fill="#0B0B12" />
+  <circle cx="54" cy="38" r="24" fill="#8B5CF6" />
+  <path d="M50 28h8v16h9l-13 15-13-15h9z" fill="#FFFFFF" />
+  <rect x="34" y="74" width="40" height="6" rx="3" fill="#F3F2F8" />
+</svg>
