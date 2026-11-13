@@ -39,8 +39,8 @@ android {
         applicationId = "io.anyvideo.downloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.2.1"
+        versionCode = 8
+        versionName = "1.2.2"
 
         buildConfigField("String", "DEFAULT_RESOLVER_API", "\"$bakedResolver\"")
     }
@@ -48,7 +48,7 @@ android {
     signingConfigs {
         if (keystorePropertiesFile.exists()) {
             create("release") {
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
@@ -61,8 +61,16 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Updates replace the installed app only when the key stays the same, so a release
+            // signed with the debug key is a dead end once people have installed it.
             signingConfig = signingConfigs.findByName("release")
-                ?: signingConfigs.getByName("debug")
+                ?: run {
+                    logger.warn(
+                        "AnyVideo: keystore.properties is missing, so this release is signed " +
+                            "with the debug key. Do not publish it.",
+                    )
+                    signingConfigs.getByName("debug")
+                }
         }
     }
 

@@ -91,104 +91,6 @@ fun SettingsScreen(
                 .padding(16.dp),
         ) {
             SurfaceCard {
-                Text("Updates", fontWeight = FontWeight.SemiBold)
-                Text(
-                    "AnyVideo ${BuildConfig.VERSION_NAME}. Updates come from this project's GitHub " +
-                        "releases, because the app is not on Play.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(6.dp))
-                val update = updateState
-                Text(
-                    when (update) {
-                        is Updates.State.Idle -> "Check to see whether a newer version exists."
-                        is Updates.State.Checking -> "Checking GitHub…"
-                        is Updates.State.UpToDate -> "You are on the newest version."
-                        is Updates.State.Available -> "Version ${update.release.name} is available."
-                        is Updates.State.Downloading ->
-                            if (update.total > 0) {
-                                "Downloading ${formatBytes(update.received)} of ${formatBytes(update.total)}"
-                            } else {
-                                "Downloading ${formatBytes(update.received)}"
-                            }
-                        is Updates.State.Ready ->
-                            "Version ${update.release.name} is downloaded. Android asks you to " +
-                                "confirm the install."
-                        is Updates.State.Failed -> update.message
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (update is Updates.State.Failed) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-                when (update) {
-                    is Updates.State.Available -> {
-                        if (update.release.notes.isNotBlank()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                update.release.notes,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 5,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (update.release.size > 0) {
-                            Text(
-                                "${formatBytes(update.release.size)} download",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { scope.launch { Updates.download(context, update.release) } }) {
-                            Text("Download update")
-                        }
-                    }
-                    is Updates.State.Downloading -> {
-                        Spacer(Modifier.height(8.dp))
-                        if (update.total > 0) {
-                            LinearProgressIndicator(
-                                progress = { (update.received.toFloat() / update.total).coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        }
-                    }
-                    is Updates.State.Ready -> {
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = {
-                            if (!Updates.install(context, update.file)) {
-                                Toast.makeText(
-                                    context,
-                                    "Allow installs from AnyVideo, then tap Install again",
-                                    Toast.LENGTH_LONG,
-                                ).show()
-                            }
-                        }) { Text("Install update") }
-                    }
-                    else -> {
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            enabled = update !is Updates.State.Checking,
-                            onClick = { scope.launch { Updates.check(context) } },
-                        ) {
-                            Text(
-                                when {
-                                    update is Updates.State.Checking -> "Checking…"
-                                    update is Updates.State.Failed -> "Try again"
-                                    else -> "Check for updates"
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-
-            SurfaceCard {
                 Text("Appearance", fontWeight = FontWeight.SemiBold)
                 Text(
                     "Auto follows your phone's light or dark setting.",
@@ -469,6 +371,104 @@ fun SettingsScreen(
                         "terms of the services you download from.",
                 )
             }
+            SurfaceCard {
+                Text("Updates", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "AnyVideo ${BuildConfig.VERSION_NAME}. Updates come from this project's GitHub " +
+                        "releases, because the app is not on Play.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                val update = updateState
+                Text(
+                    when (update) {
+                        is Updates.State.Idle -> "Check to see whether a newer version exists."
+                        is Updates.State.Checking -> "Checking GitHub…"
+                        is Updates.State.UpToDate -> "You are on the newest version."
+                        is Updates.State.Available -> "Version ${update.release.name} is available."
+                        is Updates.State.Downloading ->
+                            if (update.total > 0) {
+                                "Downloading ${formatBytes(update.received)} of ${formatBytes(update.total)}"
+                            } else {
+                                "Downloading ${formatBytes(update.received)}"
+                            }
+                        is Updates.State.Ready ->
+                            "Version ${update.release.name} is downloaded. Android asks you to " +
+                                "confirm the install."
+                        is Updates.State.Failed -> update.message
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (update is Updates.State.Failed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                when (update) {
+                    is Updates.State.Available -> {
+                        if (update.release.notes.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                update.release.notes,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 5,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (update.release.size > 0) {
+                            Text(
+                                "${formatBytes(update.release.size)} download",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = { scope.launch { Updates.download(context, update.release) } }) {
+                            Text("Download update")
+                        }
+                    }
+                    is Updates.State.Downloading -> {
+                        Spacer(Modifier.height(8.dp))
+                        if (update.total > 0) {
+                            LinearProgressIndicator(
+                                progress = { (update.received.toFloat() / update.total).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    is Updates.State.Ready -> {
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = {
+                            if (!Updates.install(context, update.file)) {
+                                Toast.makeText(
+                                    context,
+                                    "Allow installs from AnyVideo, then tap Install again",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }) { Text("Install update") }
+                    }
+                    else -> {
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            enabled = update !is Updates.State.Checking,
+                            onClick = { scope.launch { Updates.check(context) } },
+                        ) {
+                            Text(
+                                when {
+                                    update is Updates.State.Checking -> "Checking…"
+                                    update is Updates.State.Failed -> "Try again"
+                                    else -> "Check for updates"
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
         }
     }

@@ -22,6 +22,12 @@ No resolver instance is committed. A build that should ship one bakes it in:
 
 Debug builds accept the smoke test mock base and loopback cleartext. Release builds do not.
 
+Release APKs are signed with the project key in `keystore/anyvideo-release.jks`, configured by
+`keystore.properties` at the repository root. Both files are gitignored and must stay out of git.
+Every published release must use this same key: Android only replaces an installed app when the
+signature matches, so a build signed another way cannot be installed as an update. Without
+`keystore.properties` the release falls back to the debug key, and that APK must not be published.
+
 ## Git identity and publishing
 
 This repository follows [docs/identity-policy.md](docs/identity-policy.md).
