@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -45,7 +47,12 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onSignIn: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onSignIn: () -> Unit,
+    themeMode: String,
+    onThemeChanged: (String) -> Unit,
+) {
     val context = LocalContext.current
     var notifications by remember { mutableStateOf(Prefs.showDownloadNotifications) }
     var autoClipboard by remember { mutableStateOf(Prefs.autoDownloadClipboard) }
@@ -78,6 +85,28 @@ fun SettingsScreen(onBack: () -> Unit, onSignIn: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
+            SurfaceCard {
+                Text("Appearance", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Auto follows your phone's light or dark setting.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("auto" to "Auto", "light" to "Light", "dark" to "Dark").forEach { (value, label) ->
+                        FilterChip(
+                            selected = themeMode == value,
+                            onClick = {
+                                Prefs.themeMode = value
+                                onThemeChanged(value)
+                            },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+            }
+
             SurfaceCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {

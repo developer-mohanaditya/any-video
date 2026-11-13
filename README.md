@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/download/v1.0.0/AnyVideo-1.0.0.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.0.0-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/download/v1.1.0/AnyVideo-1.1.0.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.1.0-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-8.0_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 8.0 and newer" />
 
@@ -15,11 +15,11 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.0.0.apk`, about 1.6 MB.
+The installable file is `AnyVideo-1.1.0.apk`, about 1.6 MB.
 
-- Direct download: [AnyVideo-1.0.0.apk](https://github.com/developer-mohanaditya/any-video/releases/download/v1.0.0/AnyVideo-1.0.0.apk)
+- Direct download: [AnyVideo-1.1.0.apk](https://github.com/developer-mohanaditya/any-video/releases/download/v1.1.0/AnyVideo-1.1.0.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.0.0.apk](AnyVideo-1.0.0.apk)
+- Copy in the repository: [AnyVideo-1.1.0.apk](AnyVideo-1.1.0.apk)
 
 Android 8.0 or newer. The APK is signed with a development key, so Android will ask you to allow
 installs from your browser or your file manager. If a later version is signed with a different key,
@@ -27,8 +27,8 @@ uninstall this one first.
 
 ## What it is
 
-Paste a link, or share one into AnyVideo, and the app finds the media, downloads it with the system
-downloader, and files it in your gallery with the creator's username in the file name. There is no
+Paste a link, or share one into AnyVideo, and the app finds the media, downloads it itself with a
+live progress bar, and files it in your gallery with the creator's username in the file name. There is no
 account to create, no advertising SDK and no analytics. Instagram posts can also be resolved on the
 device itself. YouTube, TikTok, X and Pinterest go through a cobalt compatible resolver.
 
@@ -41,7 +41,7 @@ device itself. YouTube, TikTok, X and Pinterest go through a cobalt compatible r
 3. Pick the item you want and tap Download.
 
 Photos land in `Pictures/anyvideo`, videos in `Movies/anyvideo`. Carousels arrive as separate files
-with a numbered suffix, so nothing overwrites anything else.
+and each one is queued once, so a carousel pasted a single time is not downloaded twice.
 
 ### Save a story, or a post from a private account you follow
 
@@ -64,8 +64,9 @@ Pages are fetched a few at a time with a short pause between them, so a first ru
 
 ### Save something the app cannot parse
 
-Open the Browser tab and load the page. The browser records media requests and media that the page
-exposes to scripts, then you save whatever you want from that list.
+Open the Browser tab and load the page. It is a plain browser with an address bar and a progress
+line, and it keeps the session used for private posts. Long press a video or image in the page to
+save the file it points at.
 
 ### Repost with credit
 
@@ -92,7 +93,9 @@ pick to the usual folders.
 | Video | `Movies/anyvideo` | `user-___C1a2B3c4___-.mp4` |
 | Audio | `Music/anyvideo` | `YouTube-___jNQXAC9IVRw___-.mp3` |
 
-Downloads has separate Photos, Videos and Audio tabs with share, repost and delete.
+Downloads has separate Photos, Videos and Audio tabs. Swipe left and right to move between them,
+tap a tile to preview it full screen, and long press a tile to select several, then share or delete
+them together. Active downloads show their progress at the top of the Home and Downloads screens.
 
 ## Instagram, and the risk that comes with it
 
@@ -104,6 +107,8 @@ temporary limits or a lock. Downloads are paced and stop on the first sign of a 
 the volume low and use an account you can afford to lose.
 
 ## Settings worth knowing
+
+- **Appearance**: Auto follows the phone, or pin Light or Dark. The choice applies to every screen.
 
 - **Resolver**: base URL and key for a cobalt compatible instance. **Test** calls `GET /` and
   reports the version and the number of services. No instance ships with this source, so set one

@@ -85,6 +85,53 @@ object Library {
         return items
     }
 
+    /** True when a file with this name is already in the shared folder. */
+    fun exists(context: Context, relativePath: String, fileName: String): Boolean {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val collection = when {
+                relativePath.startsWith("Movies") -> MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                relativePath.startsWith("Music") -> MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                else -> MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            }
+            val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND " +
+                "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+            return runCatching {
+                context.contentResolver.query(
+                    collection,
+                    arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE),
+                    selection,
+                    arrayOf("$relativePath%", fileName),
+                    null,
+                )?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    var found = false
+                    while (cursor.moveToNext()) {
+                        val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE))
+                        if (size <= 0L) continue
+                        // A row can outlive its file, and a stale row must not make the app think
+                        // this download already happened. Only count a row that can be opened.
+                        val uri = Uri.withAppendedPath(collection, cursor.getLong(idColumn).toString())
+                        if (canOpen(context, uri)) {
+                            found = true
+                        } else {
+                            // A row with no file behind it blocks a fresh insert with a UNIQUE
+                            // error on _data and shows as a broken tile. Drop it.
+                            runCatching { context.contentResolver.delete(uri, null, null) }
+                        }
+                    }
+                    found
+                } ?: false
+            }.getOrDefault(false)
+        }
+        val standard = relativePath.substringBefore('/')
+        val folder = File(
+            android.os.Environment.getExternalStoragePublicDirectory(standard),
+            relativePath.substringAfter('/', "anyvideo"),
+        )
+        val file = File(folder, fileName)
+        return file.exists() && file.length() > 0L
+    }
+
     private fun canOpen(context: Context, uri: Uri): Boolean = runCatching {
         // `length` is -1 (unknown) for some providers, which still means the file is there.
         context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length != 0L } ?: false

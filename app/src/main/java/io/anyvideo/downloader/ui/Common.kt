@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -251,6 +252,52 @@ fun GridTile(
                 lineHeight = 15.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Compact live progress for the transfers the app is running, shown above the content. */
+@Composable
+fun ActiveDownloadStrip(tasks: List<io.anyvideo.downloader.download.Downloader.Task>, modifier: Modifier = Modifier) {
+    val active = tasks.filter {
+        it.state == io.anyvideo.downloader.download.Downloader.State.QUEUED ||
+            it.state == io.anyvideo.downloader.download.Downloader.State.RUNNING
+    }
+    if (active.isEmpty()) return
+    Column(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+    ) {
+        active.take(3).forEach { task ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    task.fileName,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    when (task.state) {
+                        io.anyvideo.downloader.download.Downloader.State.QUEUED -> "queued"
+                        else -> "${(task.progress * 100).toInt()}%"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (task.state == io.anyvideo.downloader.download.Downloader.State.RUNNING) {
+                LinearProgressIndicator(
+                    progress = { task.progress },
+                    modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 3.dp),
+                )
+            }
+        }
+        if (active.size > 3) {
+            Text(
+                "+${active.size - 3} more",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

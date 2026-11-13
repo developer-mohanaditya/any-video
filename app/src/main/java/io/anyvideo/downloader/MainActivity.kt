@@ -24,6 +24,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -64,12 +65,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleIntent(intent)
         setContent {
-            AnyVideoTheme {
-                AppRoot(
-                    incomingUrl = incomingUrl,
-                    onIncomingConsumed = { incomingUrl = null },
-                )
-            }
+            AppRoot(
+                incomingUrl = incomingUrl,
+                onIncomingConsumed = { incomingUrl = null },
+            )
         }
     }
 
@@ -143,6 +142,29 @@ private fun requiredPermissions(): Array<String> {
 
 @Composable
 private fun AppRoot(incomingUrl: String?, onIncomingConsumed: () -> Unit) {
+    var themeMode by remember { mutableStateOf(Prefs.themeMode) }
+    val darkTheme = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> isSystemInDarkTheme()
+    }
+    AnyVideoTheme(darkTheme = darkTheme) {
+    AppRootContent(
+        incomingUrl = incomingUrl,
+        onIncomingConsumed = onIncomingConsumed,
+        themeMode = themeMode,
+        onThemeChanged = { themeMode = it },
+    )
+    }
+}
+
+@Composable
+private fun AppRootContent(
+    incomingUrl: String?,
+    onIncomingConsumed: () -> Unit,
+    themeMode: String,
+    onThemeChanged: (String) -> Unit,
+) {
     var screen by remember { mutableStateOf(Screen.HOME) }
     var autoUrl by remember { mutableStateOf<String?>(null) }
     // What the Browser tab opens next; set by the Instagram sign-in actions.
@@ -199,9 +221,7 @@ private fun AppRoot(incomingUrl: String?, onIncomingConsumed: () -> Unit) {
                     onNavigate = { screen = it },
                 )
 
-                Screen.DOWNLOADS -> DownloadsScreen(
-                    onNavigate = { screen = it },
-                )
+                Screen.DOWNLOADS -> DownloadsScreen()
 
                 Screen.BROWSE -> BrowserScreen(startUrl = browserUrl)
 
@@ -223,6 +243,8 @@ private fun AppRoot(incomingUrl: String?, onIncomingConsumed: () -> Unit) {
                 Screen.SETTINGS -> SettingsScreen(
                     onBack = { screen = Screen.HOME },
                     onSignIn = openInstagramSignIn,
+                    themeMode = themeMode,
+                    onThemeChanged = onThemeChanged,
                 )
             }
         }

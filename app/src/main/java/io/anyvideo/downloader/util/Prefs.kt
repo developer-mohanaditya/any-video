@@ -29,6 +29,11 @@ object Prefs {
         }
         set(value) = sp.edit().putString("instagram_mock_base", value.trim()).apply()
 
+    /** Appearance: "auto" follows the system, otherwise "light" or "dark". */
+    var themeMode: String
+        get() = sp.getString("theme_mode", "auto") ?: "auto"
+        set(value) = sp.edit().putString("theme_mode", value).apply()
+
     var showDownloadNotifications: Boolean
         get() = sp.getBoolean("notifications", true)
         set(value) = sp.edit().putBoolean("notifications", value).apply()

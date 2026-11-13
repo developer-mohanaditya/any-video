@@ -48,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +86,7 @@ fun HomeScreen(
     onNavigate: (Screen) -> Unit,
 ) {
     val context = LocalContext.current
+    val downloadTasks by Downloader.tasks.collectAsState()
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
 
@@ -92,6 +94,10 @@ fun HomeScreen(
     var loading by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<MediaCandidate>>(emptyList()) }
     var message by remember { mutableStateOf<String?>(null) }
+    val failedTask = downloadTasks.lastOrNull { it.state == Downloader.State.FAILED }
+    LaunchedEffect(failedTask?.id, failedTask?.error) {
+        failedTask?.let { message = "${it.fileName}: ${it.error}".take(140) }
+    }
     /** True when the current card was already queued by the paste, so it needs no button. */
     var autoSaved by remember { mutableStateOf(false) }
     var recent by remember { mutableStateOf(listOf<RecentProfile>()) }
@@ -283,16 +289,20 @@ fun HomeScreen(
                     maxCardHeight = maxHeight,
                     queued = autoSaved,
                     onSave = {
-                        val id = Downloader.enqueue(context, preview)
+                        val started = Downloader.enqueue(context, preview)
                         Toast.makeText(
                             context,
-                            if (id != null) "Download started" else "Could not start the download",
+                            if (started) "Download started" else "Already downloading or saved",
                             Toast.LENGTH_SHORT,
                         ).show()
                     },
                     onSaveAll = {
                         val count = Downloader.enqueueAll(context, results)
-                        Toast.makeText(context, "Queued $count download(s)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            if (count > 0) "Queued $count download(s)" else "Nothing new to download",
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     },
                 )
                 }
@@ -325,6 +335,8 @@ fun HomeScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        ActiveDownloadStrip(downloadTasks)
 
         // Below the field: a smaller share than the space above pulls it lower than dead centre,
         // and keeps it clear of the navigation bar once a card is showing.
@@ -363,7 +375,9 @@ private fun PreviewCard(
     ) {
         Column {
             Box(modifier = Modifier.fillMaxWidth().height(thumbHeight)) {
-                val thumb = candidate.thumbnailUrl ?: fallbackThumbnail(sourceUrl)
+                val thumb = candidate.thumbnailUrl
+                    ?: fallbackThumbnail(sourceUrl)
+                    ?: candidate.url.takeIf { !candidate.isVideo }
                 if (thumb != null) {
                     AsyncImage(
                         model = thumb,

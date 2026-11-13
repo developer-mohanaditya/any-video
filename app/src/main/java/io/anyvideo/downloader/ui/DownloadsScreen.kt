@@ -1,15 +1,21 @@
 package io.anyvideo.downloader.ui
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.widget.MediaController
 import android.widget.Toast
+import android.widget.VideoView
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,220 +25,526 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import io.anyvideo.downloader.Screen
 import io.anyvideo.downloader.data.Library
 import io.anyvideo.downloader.data.MediaKind
 import io.anyvideo.downloader.data.MimeTypes
 import io.anyvideo.downloader.data.SavedMedia
+import io.anyvideo.downloader.download.Downloader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private val TABS = listOf("Photos", "Videos", "Audio")
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun DownloadsScreen(onNavigate: (Screen) -> Unit) {
+fun DownloadsScreen() {
     val context = LocalContext.current
-    var tab by remember { mutableIntStateOf(0) }
-    var items by remember { mutableStateOf<List<SavedMedia>>(emptyList()) }
+    val pager = rememberPagerState(pageCount = { TABS.size })
     var refreshKey by remember { mutableIntStateOf(0) }
-    var selected by remember { mutableStateOf<SavedMedia?>(null) }
+    val scope = rememberCoroutineScope()
+    var selection by remember { mutableStateOf<Set<SavedMedia>>(emptySet()) }
+    var preview by remember { mutableStateOf<SavedMedia?>(null) }
 
-    LaunchedEffect(tab, refreshKey) {
-        val kind = when (tab) {
-            1 -> MediaKind.VIDEO
-            2 -> MediaKind.AUDIO
-            else -> MediaKind.PHOTO
-        }
-        items = withContext(Dispatchers.IO) { Library.load(context, kind) }
+    val tasks by Downloader.tasks.collectAsState()
+    val active = tasks.filter { it.state == Downloader.State.QUEUED || it.state == Downloader.State.RUNNING }
+    val doneCount = tasks.count { it.state == Downloader.State.DONE }
+
+    // A finished transfer must show up in the grid without the user pulling to refresh.
+    LaunchedEffect(doneCount) {
+        if (doneCount > 0) refreshKey++
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Downloads", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "${items.size} item(s) in anyvideo",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Scaffold(
+        topBar = {
+            if (selection.isNotEmpty()) {
+                SelectionBar(
+                    count = selection.size,
+                    onShare = { shareSelection(context, selection) },
+                    onDelete = {
+                        deleteSelection(context, selection)
+                        selection = emptySet()
+                        refreshKey++
+                    },
+                    onClose = { selection = emptySet() },
                 )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Downloads", style = MaterialTheme.typography.headlineSmall)
+                        Text(
+                            if (active.isEmpty()) "Saved in Pictures, Movies and Music"
+                            else "Downloading ${active.size} file(s)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { refreshKey++ }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                    }
+                }
             }
-            IconButton(onClick = { refreshKey++ }) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+        },
+    ) { padding ->
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (active.isNotEmpty()) {
+                ActiveDownloads(active)
             }
-        }
 
-        TabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background) {
-            listOf("Photos", "Videos", "Audio").forEachIndexed { index, label ->
-                Tab(
-                    selected = tab == index,
-                    onClick = { tab = index },
-                    text = { Text(label) },
-                )
+            TabRow(
+                selectedTabIndex = pager.currentPage,
+                containerColor = MaterialTheme.colorScheme.background,
+            ) {
+                TABS.forEachIndexed { index, label ->
+                    Tab(
+                        selected = pager.currentPage == index,
+                        onClick = {
+                            selection = emptySet()
+                            scope.launch { pager.animateScrollToPage(index) }
+                        },
+                        text = { Text(label) },
+                    )
+                }
             }
-        }
 
-        if (items.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                EmptyState(
-                    when (tab) {
-                        0 -> "Saved pictures will be listed here."
-                        1 -> "Saved videos will be listed here."
-                        else -> "Saved audio will be listed here."
+            // Tabs follow the pager, and the pager follows a swipe, so the two are one control.
+            LaunchedEffect(pager.currentPage) {
+                selection = emptySet()
+            }
+
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                MediaPage(
+                    kind = when (page) {
+                        1 -> MediaKind.VIDEO
+                        2 -> MediaKind.AUDIO
+                        else -> MediaKind.PHOTO
+                    },
+                    refreshKey = refreshKey,
+                    selection = selection,
+                    onOpen = { preview = it },
+                    onToggle = { media ->
+                        selection = if (media in selection) selection - media else selection + media
                     },
                 )
             }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                items(items) { media ->
-                    Box(
-                        modifier = Modifier
-                            .aspectRatio(1f)
-                            .combinedClickable(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(media.uri, MimeTypes.forKind(media.name, media.kind))
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (t: Throwable) {
-                                        Toast.makeText(context, "No app can open this file", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                onLongClick = { selected = media },
-                            ),
-                    ) {
-                        if (media.kind == MediaKind.AUDIO) {
-                            // Audio has no frame to show, so the tile carries the facts there are:
-                            // where it came from, what format it is and how big it is.
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    Icons.Filled.MusicNote,
-                                    contentDescription = media.name,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(26.dp),
-                                )
-                            }
-                            Text(
-                                "${media.name.substringAfterLast('.', "").uppercase()} · ${media.size / 1024} KB",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(4.dp),
-                            )
-                        } else {
-                            AsyncImage(
-                                model = media.uri,
-                                contentDescription = media.name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-                        if (media.kind == MediaKind.VIDEO) {
-                            Text(
-                                "VIDEO",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White,
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(6.dp),
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 
-    selected?.let { media ->
-        AlertDialog(
-            onDismissRequest = { selected = null },
-            title = { Text(media.name, style = MaterialTheme.typography.titleSmall) },
-            text = {
-                Column {
-                    Text("${media.size / 1024} KB")
-                    Spacer(Modifier.height(4.dp))
-                    TextButton(onClick = {
-                        val share = Intent(Intent.ACTION_SEND).apply {
-                            type = MimeTypes.forKind(media.name, media.kind)
-                            putExtra(Intent.EXTRA_STREAM, media.uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(share, "Share"))
-                        selected = null
-                    }) {
-                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.size(8.dp))
-                        Text("Share")
-                    }
-                    if (media.kind == MediaKind.PHOTO) {
-                        TextButton(onClick = {
-                            selected = null
-                            onNavigate(Screen.REPOST)
-                        }) { Text("Repost with credit") }
-                    }
-                    TextButton(onClick = {
-                        val deleted = Library.delete(context, media)
-                        Toast.makeText(
-                            context,
-                            if (deleted) "Deleted" else "Could not delete",
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                        selected = null
-                        refreshKey++
-                    }) {
-                        Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.size(8.dp))
-                        Text("Delete")
-                    }
-                }
+    preview?.let { media ->
+        MediaPreviewDialog(
+            media = media,
+            onDismiss = { preview = null },
+            onShare = {
+                share(context, media)
+                preview = null
             },
-            confirmButton = {
-                TextButton(onClick = { selected = null }) { Text("Close") }
+            onDelete = {
+                Library.delete(context, media)
+                preview = null
+                refreshKey++
             },
         )
     }
+}
+
+@Composable
+private fun ActiveDownloads(tasks: List<Downloader.Task>) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        tasks.take(3).forEach { task ->
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        task.fileName,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f).padding(start = 8.dp),
+                    )
+                    Text(
+                        when (task.state) {
+                            Downloader.State.QUEUED -> "Queued"
+                            Downloader.State.FAILED -> "Failed"
+                            else -> "${(task.progress * 100).toInt()}%"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (task.state == Downloader.State.RUNNING) {
+                    LinearProgressIndicator(
+                        progress = { task.progress },
+                        modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 4.dp),
+                    )
+                }
+            }
+        }
+        if (tasks.size > 3) {
+            Text(
+                "+${tasks.size - 3} more in progress",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MediaPage(
+    kind: MediaKind,
+    refreshKey: Int,
+    selection: Set<SavedMedia>,
+    onOpen: (SavedMedia) -> Unit,
+    onToggle: (SavedMedia) -> Unit,
+) {
+    val context = LocalContext.current
+    var items by remember { mutableStateOf<List<SavedMedia>>(emptyList()) }
+
+    LaunchedEffect(kind, refreshKey) {
+        items = withContext(Dispatchers.IO) { Library.load(context, kind) }
+    }
+
+    if (items.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            EmptyState(
+                when (kind) {
+                    MediaKind.PHOTO -> "Saved photos will be listed here."
+                    MediaKind.VIDEO -> "Saved videos will be listed here."
+                    MediaKind.AUDIO -> "Saved audio will be listed here."
+                },
+            )
+        }
+        return
+    }
+
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        items(items, key = { it.uri.toString() }) { media ->
+            val chosen = media in selection
+            MediaTile(
+                media = media,
+                chosen = chosen,
+                onClick = { if (selection.isEmpty()) onOpen(media) else onToggle(media) },
+                onLongClick = { onToggle(media) },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MediaTile(
+    media: SavedMedia,
+    chosen: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
+        when (media.kind) {
+            MediaKind.AUDIO -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.MusicNote,
+                    contentDescription = media.name,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+            MediaKind.VIDEO -> VideoThumbnail(media)
+            MediaKind.PHOTO -> AsyncImage(
+                model = media.uri,
+                contentDescription = media.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        if (media.kind == MediaKind.VIDEO) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(30.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
+        Text(
+            "${media.size / 1024} KB",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .background(Color.Black.copy(alpha = 0.45f))
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+        )
+
+        if (chosen) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+            )
+        }
+    }
+}
+
+/**
+ * Coil cannot decode a video frame without the extra video artifact, so the first frame is
+ * pulled here. A failed decode falls back to the tile background and the play badge.
+ */
+@Composable
+private fun VideoThumbnail(media: SavedMedia) {
+    val context = LocalContext.current
+    var frame by remember(media.uri) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(media.uri) {
+        frame = withContext(Dispatchers.IO) {
+            runCatching {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(context, media.uri)
+                    retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                } finally {
+                    retriever.release()
+                }
+            }.getOrNull()
+        }
+    }
+    frame?.let {
+        androidx.compose.foundation.Image(
+            bitmap = it.asImageBitmap(),
+            contentDescription = media.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun SelectionBar(
+    count: Int,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onClose) {
+            Icon(Icons.Filled.Close, contentDescription = "Clear selection")
+        }
+        Text("$count selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        IconButton(onClick = onShare) {
+            Icon(Icons.Filled.Share, contentDescription = "Share")
+        }
+        IconButton(onClick = onDelete) {
+            Icon(Icons.Filled.Delete, contentDescription = "Delete")
+        }
+    }
+}
+
+@Composable
+private fun MediaPreviewDialog(
+    media: SavedMedia,
+    onDismiss: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            if (media.kind == MediaKind.PHOTO) {
+                ZoomableImage(media)
+            } else {
+                VideoSurface(media)
+            }
+
+            Row(
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onShare) {
+                    Icon(Icons.Filled.Share, contentDescription = "Share", tint = Color.White)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = Color.White)
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
+                }
+            }
+
+            Text(
+                media.name,
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ZoomableImage(media: SavedMedia) {
+    var scale by remember { mutableStateOf(1f) }
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
+    AsyncImage(
+        model = media.uri,
+        contentDescription = media.name,
+        contentScale = ContentScale.Fit,
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    scale = (scale * zoom).coerceIn(1f, 5f)
+                    if (scale > 1f) {
+                        offsetX += pan.x
+                        offsetY += pan.y
+                    } else {
+                        offsetX = 0f
+                        offsetY = 0f
+                    }
+                }
+            }
+            .graphicsLayer(
+                scaleX = scale,
+                scaleY = scale,
+                translationX = offsetX,
+                translationY = offsetY,
+            ),
+    )
+}
+
+@Composable
+private fun VideoSurface(media: SavedMedia) {
+    val context = LocalContext.current
+    var view by remember { mutableStateOf<VideoView?>(null) }
+    AndroidView(
+        factory = {
+            VideoView(context).apply {
+                val controller = MediaController(context)
+                controller.setAnchorView(this)
+                setMediaController(controller)
+                setVideoURI(media.uri)
+                setOnPreparedListener { player ->
+                    player.isLooping = false
+                    start()
+                }
+                view = this
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
+    DisposableEffect(media.uri) {
+        onDispose { view?.stopPlayback() }
+    }
+}
+
+private fun share(context: android.content.Context, media: SavedMedia) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = MimeTypes.forKind(media.name, media.kind)
+        putExtra(Intent.EXTRA_STREAM, media.uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching { context.startActivity(Intent.createChooser(intent, "Share")) }
+        .onFailure { Toast.makeText(context, "No app can share this file", Toast.LENGTH_SHORT).show() }
+}
+
+private fun shareSelection(context: android.content.Context, media: Set<SavedMedia>) {
+    val uris = ArrayList(media.map { it.uri })
+    if (uris.isEmpty()) return
+    val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+        type = "*/*"
+        putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching { context.startActivity(Intent.createChooser(intent, "Share ${uris.size} files")) }
+        .onFailure { Toast.makeText(context, "No app can share these files", Toast.LENGTH_SHORT).show() }
+}
+
+private fun deleteSelection(context: android.content.Context, media: Set<SavedMedia>) {
+    var deleted = 0
+    media.forEach { if (Library.delete(context, it)) deleted++ }
+    Toast.makeText(context, "Deleted $deleted file(s)", Toast.LENGTH_SHORT).show()
 }
