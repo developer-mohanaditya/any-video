@@ -6,7 +6,7 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/download/v1.1.0/AnyVideo-1.2.2.apk">
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.2.2.apk">
   <img src="https://img.shields.io/badge/Download_AnyVideo_1.2.2-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-8.0_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 8.0 and newer" />
@@ -17,13 +17,16 @@
 
 The installable file is `AnyVideo-1.2.2.apk`, about 1.6 MB.
 
-- Direct download: [AnyVideo-1.2.2.apk](https://github.com/developer-mohanaditya/any-video/releases/download/v1.1.0/AnyVideo-1.2.2.apk)
+- Direct download: [AnyVideo-1.2.2.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.2.2.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
 - Copy in the repository: [AnyVideo-1.2.2.apk](AnyVideo-1.2.2.apk)
 
-Android 8.0 or newer. The APK is signed with a development key, so Android will ask you to allow
-installs from your browser or your file manager. If a later version is signed with a different key,
-uninstall this one first.
+Android 8.0 or newer. The APK is signed with the project release key, so later versions install
+over this one and keep your settings and downloads. Android will ask once for permission to
+install from your browser or file manager, and Play Protect may ask you to confirm because the
+app does not come from the Play Store.
+
+After the first install, updates happen inside the app: Settings, Updates, Check for updates.
 
 ## What it is
 
@@ -109,6 +112,9 @@ the volume low and use an account you can afford to lose.
 ## Settings worth knowing
 
 - **Appearance**: Auto follows the phone, or pin Light or Dark. The choice applies to every screen.
+- **Updates**: checks this project's GitHub releases, shows the notes and size, downloads the APK
+  and hands it to Android's installer. It only installs a file that is AnyVideo signed with the
+  same key as the copy already on the phone.
 
 - **Resolver**: base URL and key for a cobalt compatible instance. **Test** calls `GET /` and
   reports the version and the number of services. No instance ships with this source, so set one
