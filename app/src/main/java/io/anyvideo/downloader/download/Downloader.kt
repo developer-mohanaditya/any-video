@@ -170,7 +170,13 @@ object Downloader {
         }
     }
 
-    private fun isRetryableEmpty(message: String) = message == "Empty file" || message == "Empty reply"
+    /**
+     * A tunnel URL that sat in the resolver cache can expire before its download starts, which
+     * surfaces as 404 or 410. A fresh resolver reply fixes it, just like an empty body does.
+     */
+    private fun isRetryableEmpty(message: String) =
+        message == "Empty file" || message == "Empty reply" ||
+            message == "HTTP 404" || message == "HTTP 410"
 
     private suspend fun run(
         context: Context,

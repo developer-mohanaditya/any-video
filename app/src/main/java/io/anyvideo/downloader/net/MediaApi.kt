@@ -238,9 +238,13 @@ object MediaApi {
         val user = userFor(pageUrl)
         val id = idFor(pageUrl) ?: System.currentTimeMillis().toString()
         val suffix = if (index > 0) "${id}_$index" else id
+        // YouTube hands back the real video title, which is far more useful in the gallery than
+        // an opaque video id. Other services keep the original app's username-id convention.
+        val name = if (isYouTube(pageUrl)) titleFileName(apiName) ?: FileNames.build(user, suffix, extension)
+        else FileNames.build(user, suffix, extension)
         return MediaCandidate(
             url = url,
-            fileName = FileNames.build(user, suffix, extension),
+            fileName = name,
             // An audio file is not its own thumbnail: leave it null so the card shows the
             // platform mark instead of an image that can never load.
             thumbnailUrl = thumbnail ?: if (isVideo || audioOnly) null else url,
@@ -250,6 +254,33 @@ object MediaApi {
             // instance key to either would leak it, so downloads carry no API credentials.
             headers = emptyMap(),
         )
+    }
+
+    /**
+     * The title cobalt returns in `filename`, made safe for a gallery entry: path separators and
+     * reserved characters become spaces, and the name is kept short enough for MediaStore.
+     */
+    private fun titleFileName(apiName: String?): String? {
+        val raw = apiName?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        val extension = extensionOf(raw) ?: return null
+        val base = raw.substringBeforeLast('.').trim()
+        if (base.isEmpty()) return null
+        val cleaned = base
+            .replace(Regex("""[\\/:*?"<>|\r\n\t]"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .trimEnd('.')
+        if (cleaned.isEmpty()) return null
+        // cobalt appends the chosen quality, as in "Title (720p, h264)". The resolution is
+        // already implied by the file, so the gallery keeps just the title.
+        val withoutQuality = cleaned.replace(
+            Regex("""\s*\([^()]*?\b\d{3,4}p\b[^()]*\)\s*$"""),
+            "",
+        ).trim().trimEnd('.')
+        val finalName = withoutQuality.ifEmpty { cleaned }
+        val shortened = if (finalName.length > 100) finalName.take(100).trimEnd() else finalName
+        return "$shortened.$extension"
     }
 
     /** cobalt's `audioFormat` values mapped to the extension the file really has. */

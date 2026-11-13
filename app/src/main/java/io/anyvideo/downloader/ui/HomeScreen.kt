@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -146,9 +145,9 @@ fun HomeScreen(
                 if (outcome.candidates.isEmpty() && note == null) note = outcome.note
             }
             loading = false
-            // YouTube keeps its Download button: the quality was just chosen, the tap is the
-            // confirmation. Everything else saves itself, but still shows what is being saved.
-            val autoSave = auto && Prefs.autoDownloadClipboard && !isYouTubeLink(target)
+            // Every platform saves itself once the link is settled. A YouTube link only gets
+            // here after its format sheet was confirmed, so that tap is the confirmation.
+            val autoSave = auto && Prefs.autoDownloadClipboard
             if (autoSave && found.isNotEmpty()) {
                 val queued = Downloader.enqueueAll(context, found)
                 results = found
@@ -258,13 +257,7 @@ fun HomeScreen(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { onNavigate(Screen.SETTINGS) }) {
-                Icon(
-                    Icons.Filled.Settings,
-                    contentDescription = "Settings",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            HeaderBrands()
         }
 
         if (recent.isNotEmpty()) {
@@ -281,14 +274,6 @@ fun HomeScreen(
                 }
             }
         }
-
-        Spacer(Modifier.height(20.dp))
-        HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 20.dp),
-            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-        )
-        Spacer(Modifier.height(14.dp))
-        SupportedAppsRow()
 
         // Everything between the brand row and the field: the preview card when we have one.
         Box(
@@ -374,8 +359,9 @@ private fun PreviewCard(
 ) {
     val platform = Platform.of(sourceUrl)
     val context = LocalContext.current
-    // YouTube always asks; other services only ask when auto-save is off and nothing is queued.
-    val needsAction = platform == Platform.YOUTUBE || !queued
+    // A card only offers a button when nothing was queued: choosing a YouTube format already
+    // started the transfer, and every other platform auto-saves once its link resolves.
+    val needsAction = !queued
     // The platform ratio is only a placeholder while the image loads; once the thumbnail is
     // decoded its own proportions win, so nothing is cropped at the top or bottom.
     var measuredRatio by remember(sourceUrl, candidate.thumbnailUrl) { mutableStateOf<Float?>(null) }
@@ -474,22 +460,6 @@ private fun PreviewCard(
                         )
                     }
                 }
-                if (candidate.isVideo) {
-                    Surface(
-                        modifier = Modifier.padding(10.dp).size(30.dp).align(Alignment.BottomEnd),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Filled.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                }
             }
 
             Column(modifier = Modifier.padding(start = 14.dp, end = 12.dp, top = 10.dp, bottom = 12.dp)) {
@@ -556,7 +526,8 @@ private enum class Platform(
     TIKTOK("TikTok", R.drawable.ic_brand_tiktok, 0.5625f, 0.5625f),
     YOUTUBE("YouTube", R.drawable.ic_brand_youtube, 1.7778f, 1.7778f),
     X("X", R.drawable.ic_brand_x, 1.7778f, 1.7778f),
-    PINTEREST("Pinterest", R.drawable.ic_brand_pinterest, 0.75f, 0.75f);
+    PINTEREST("Pinterest", R.drawable.ic_brand_pinterest, 0.75f, 0.75f),
+    FACEBOOK("Facebook", R.drawable.ic_brand_facebook, 0.5625f, 0.5625f);
 
     /** Reels and stories are portrait even though the platform defaults to square posts. */
     fun ratioFor(url: String): Float {
@@ -574,6 +545,7 @@ private enum class Platform(
             url.contains("tiktok", true) -> TIKTOK
             url.contains("youtube", true) || url.contains("youtu.be", true) -> YOUTUBE
             url.contains("pinterest", true) -> PINTEREST
+            url.contains("facebook", true) || url.contains("fb.watch", true) -> FACEBOOK
             url.contains("twitter.com", true) || url.contains("x.com", true) -> X
             else -> null
         }
@@ -655,19 +627,18 @@ private fun brandTint(platform: Platform): ColorFilter? {
     }
 }
 
-/** Brand marks, evenly spread and centred. */
+/** Small brand marks at the top right, where the settings button used to sit. */
 @Composable
-private fun SupportedAppsRow() {
+private fun HeaderBrands() {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Platform.entries.forEach { platform ->
             Image(
                 painter = painterResource(platform.icon),
                 contentDescription = platform.label,
-                modifier = Modifier.size(26.dp),
+                modifier = Modifier.size(18.dp),
                 colorFilter = brandTint(platform),
             )
         }

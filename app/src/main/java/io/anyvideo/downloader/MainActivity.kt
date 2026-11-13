@@ -13,16 +13,21 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
@@ -34,6 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.anyvideo.downloader.ui.BrowserScreen
 import io.anyvideo.downloader.ui.BulkScreen
 import io.anyvideo.downloader.ui.CaptionScreen
@@ -123,6 +130,7 @@ private val tabs = listOf(
     Tab(Screen.DOWNLOADS, "Downloads", Icons.Filled.Download),
     Tab(Screen.BROWSE, "Browser", Icons.Filled.Public),
     Tab(Screen.TOOLS, "Tools", Icons.Filled.Widgets),
+    Tab(Screen.SETTINGS, "Settings", Icons.Filled.Settings),
 )
 
 private fun requiredPermissions(): Array<String> {
@@ -194,26 +202,39 @@ private fun AppRootContent(
         }
     }
 
-    val showTabs = screen in setOf(Screen.HOME, Screen.DOWNLOADS, Screen.BROWSE, Screen.TOOLS)
+    val showTabs = screen in setOf(
+        Screen.HOME, Screen.DOWNLOADS, Screen.BROWSE, Screen.TOOLS, Screen.SETTINGS,
+    )
     BackHandler(enabled = screen != Screen.HOME) { screen = Screen.HOME }
 
     Scaffold(
         bottomBar = {
             if (showTabs) {
-                NavigationBar(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.height(64.dp),
+                ) {
                     tabs.forEach { tab ->
                         NavigationBarItem(
                             selected = screen == tab.screen,
                             onClick = { screen = tab.screen },
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
-                            label = { Text(tab.label) },
+                            icon = {
+                                Icon(
+                                    tab.icon,
+                                    contentDescription = tab.label,
+                                    modifier = Modifier.size(21.dp),
+                                )
+                            },
+                            label = {
+                                Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+                            },
                         )
                     }
                 }
             }
         },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding).imePadding()) {
             when (screen) {
                 Screen.HOME -> HomeScreen(
                     autoUrl = autoUrl,

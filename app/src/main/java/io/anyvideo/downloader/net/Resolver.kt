@@ -89,6 +89,12 @@ object Resolver {
         return outcome
     }
 
+    /** A reel, a TV post or a short is a video page even when the API answers with a cover. */
+    private fun looksLikeVideoPost(url: String): Boolean {
+        val path = url.substringBefore('?').substringBefore('#').lowercase()
+        return path.contains("/reel/") || path.contains("/reels/") || path.contains("/tv/")
+    }
+
     private suspend fun lookup(activity: Activity, rawUrl: String, url: String): ResolveOutcome {
         // The resolver API is the widest net (Instagram, YouTube, X, Pinterest, …), so it goes
         // first; its failure reason is kept in case the on-device paths find nothing either.
@@ -100,6 +106,25 @@ object Resolver {
             while (true) {
                 val api = MediaApi.resolve(rawUrl)
                 if (api.candidates.isNotEmpty()) {
+                    // The API sometimes answers a reel or a TV post with its cover image only.
+                    // That is a photo of the video, not the video, so the on-device Instagram
+                    // path gets one chance to find the real stream before the image is accepted.
+                    // normalize() rewrites /reel/ to /p/, so the raw link is the one that says
+                    // this was a video page.
+                    val videoPost = Instagram.isInstagram(url) &&
+                        (looksLikeVideoPost(rawUrl) || looksLikeVideoPost(url))
+                    if (videoPost && api.candidates.none { it.isVideo }) {
+                        val direct = Instagram.resolvePost(activity, url)
+                        val videos = direct.filter { it.isVideo }
+                        if (videos.isNotEmpty()) return ResolveOutcome(videos, "Resolved from Instagram")
+                        // Saving the cover as a .jpg looks like the video downloaded, but the
+                        // gallery gets a still frame. Better to say what happened.
+                        return ResolveOutcome(
+                            emptyList(),
+                            "Instagram returned only the cover image for that reel. Sign in to " +
+                                "Instagram from Settings, then try the link again.",
+                        )
+                    }
                     return ResolveOutcome(api.candidates, "Resolved via the resolver API")
                 }
                 apiError = api.error
