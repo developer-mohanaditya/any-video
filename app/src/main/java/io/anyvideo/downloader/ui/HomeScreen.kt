@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -234,6 +235,11 @@ fun HomeScreen(
     }
 
     val preview = results.firstOrNull()
+    // A repeated link should say it is saved rather than offer the same download again.
+    val finishedTasks = downloadTasks.count { it.state == Downloader.State.DONE }
+    val allSaved = remember(results, finishedTasks) {
+        results.isNotEmpty() && results.all { Downloader.isSaved(context, it) }
+    }
 
     Column(modifier = Modifier.fillMaxSize().animateContentSize()) {
         Row(
@@ -297,6 +303,7 @@ fun HomeScreen(
                     sourceUrl = link,
                     maxCardHeight = maxHeight,
                     queued = autoSaved,
+                    saved = allSaved,
                     onSave = {
                         val started = Downloader.enqueue(context, preview)
                         Toast.makeText(
@@ -361,6 +368,7 @@ private fun PreviewCard(
     sourceUrl: String,
     maxCardHeight: Dp,
     queued: Boolean,
+    saved: Boolean,
     onSave: () -> Unit,
     onSaveAll: () -> Unit,
 ) {
@@ -499,7 +507,26 @@ private fun PreviewCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (needsAction) {
+                if (saved) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Saved to gallery",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else if (needsAction) {
                     Spacer(Modifier.height(10.dp))
                     FilledTonalButton(
                         onClick = if (count > 1) onSaveAll else onSave,

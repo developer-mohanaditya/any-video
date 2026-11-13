@@ -133,6 +133,10 @@ object Downloader {
         return true
     }
 
+    /** True when this exact file is already in the gallery. */
+    fun isSaved(context: Context, candidate: MediaCandidate): Boolean =
+        Library.exists(context.applicationContext, folderFor(candidate), candidate.fileName)
+
     /** Queues what is not queued or saved yet, and reports how many transfers actually started. */
     fun enqueueAll(context: Context, candidates: List<MediaCandidate>): Int =
         candidates.count { enqueue(context, it) }
