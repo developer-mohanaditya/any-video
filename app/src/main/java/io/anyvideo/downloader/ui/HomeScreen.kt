@@ -70,6 +70,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import android.media.MediaMetadataRetriever
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import coil.request.ImageRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import io.anyvideo.downloader.R
 import io.anyvideo.downloader.Screen
 import io.anyvideo.downloader.data.MediaCandidate
@@ -145,10 +152,10 @@ fun HomeScreen(
                 val queued = Downloader.enqueueAll(context, found)
                 results = found
                 autoSaved = queued > 0
-                message = if (queued > 0) {
-                    "Saving $queued file(s) to Pictures, Movies or Music (anyvideo)."
-                } else {
-                    "Could not start the downloads."
+                message = when {
+                    queued > 0 -> "Saving $queued file(s) to Pictures, Movies or Music (anyvideo)."
+                    found.isNotEmpty() -> "Already saved in your gallery."
+                    else -> "Could not start the downloads."
                 }
                 recent = instagramProfilesFrom(DownloadRegistry.recentSources(context, 40))
             } else {
@@ -358,6 +365,7 @@ private fun PreviewCard(
     onSaveAll: () -> Unit,
 ) {
     val platform = Platform.of(sourceUrl)
+    val context = LocalContext.current
     // YouTube always asks; other services only ask when auto-save is off and nothing is queued.
     val needsAction = platform == Platform.YOUTUBE || !queued
     // The platform ratio is only a placeholder while the image loads; once the thumbnail is
@@ -381,8 +389,25 @@ private fun PreviewCard(
                     ?: fallbackThumbnail(sourceUrl)
                     ?: candidate.url.takeIf { !candidate.isVideo }
                 if (thumb != null) {
+                    // Instagram CDN links answer with 403 unless the request looks like the app
+                    // that owns the session, so carry the candidate headers and a browser agent.
+                    val imageRequest = ImageRequest.Builder(context)
+                        .data(thumb)
+                        .apply {
+                            candidate.headers.forEach { (key, value) -> addHeader(key, value) }
+                            if (candidate.headers.keys.none { it.equals("User-Agent", true) }) {
+                                addHeader("User-Agent", BROWSER_AGENT)
+                            }
+                            if (platform == Platform.INSTAGRAM &&
+                                candidate.headers.keys.none { it.equals("Referer", true) }
+                            ) {
+                                addHeader("Referer", "https://www.instagram.com/")
+                            }
+                        }
+                        .crossfade(true)
+                        .build()
                     AsyncImage(
-                        model = thumb,
+                        model = imageRequest,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
@@ -393,6 +418,8 @@ private fun PreviewCard(
                             }
                         },
                     )
+                } else if (candidate.isVideo) {
+                    VideoPoster(candidate.url, candidate.headers, Modifier.fillMaxSize())
                 } else {
                     Box(
                         modifier = Modifier
@@ -535,6 +562,56 @@ private fun fallbackThumbnail(url: String): String? {
         else -> null
     }
     return id?.takeIf { it.isNotBlank() }?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" }
+}
+
+private const val BROWSER_AGENT =
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) " +
+        "Chrome/124.0.0.0 Mobile Safari/537.36"
+
+/**
+ * A video has no thumbnail of its own, so the first frame stands in for it. This is what makes a
+ * reel or a short show its picture instead of an empty black card.
+ */
+@Composable
+private fun VideoPoster(url: String, headers: Map<String, String>, modifier: Modifier = Modifier) {
+    val frame by produceState<ImageBitmap?>(initialValue = null, url) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    if (headers.isEmpty()) {
+                        retriever.setDataSource(url, emptyMap<String, String>())
+                    } else {
+                        retriever.setDataSource(url, headers)
+                    }
+                    retriever.getFrameAtTime(0)
+                } finally {
+                    retriever.release()
+                }
+            }.getOrNull()?.asImageBitmap()
+        }
+    }
+    val picture = frame
+    if (picture != null) {
+        Image(
+            bitmap = picture,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier,
+        )
+    } else {
+        Box(
+            modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(32.dp),
+            )
+        }
+    }
 }
 
 /**
