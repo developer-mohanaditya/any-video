@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.2.2.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.2.2-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.0.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.0-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-8.0_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 8.0 and newer" />
 
@@ -15,11 +15,11 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.2.2.apk`, about 1.6 MB.
+The installable file is `AnyVideo-1.3.0.apk`, about 1.6 MB.
 
-- Direct download: [AnyVideo-1.2.2.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.2.2.apk)
+- Direct download: [AnyVideo-1.3.0.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.0.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.2.2.apk](AnyVideo-1.2.2.apk)
+- Copy in the repository: [AnyVideo-1.3.0.apk](AnyVideo-1.3.0.apk)
 
 Android 8.0 or newer. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
@@ -31,8 +31,8 @@ After the first install, updates happen inside the app: Settings, Updates, Check
 ## What it is
 
 Paste a link, or share one into AnyVideo, and the app finds the media, downloads it itself with a
-live progress bar, and files it in your gallery with the creator's username in the file name. There is no
-account to create, no advertising SDK and no analytics. Instagram posts can also be resolved on the
+live progress bar, and files it in your gallery with the creator's username, or the YouTube video
+title, in the file name. There is no account to create, no advertising SDK and no analytics. Instagram posts can also be resolved on the
 device itself. YouTube, TikTok, X and Pinterest go through a cobalt compatible resolver.
 
 ## What you can do with it
@@ -94,7 +94,8 @@ pick to the usual folders.
 | --- | --- | --- |
 | Photo | `Pictures/anyvideo` | `user-___C1a2B3c4___-.jpg` |
 | Video | `Movies/anyvideo` | `user-___C1a2B3c4___-.mp4` |
-| Audio | `Music/anyvideo` | `YouTube-___jNQXAC9IVRw___-.mp3` |
+| YouTube video | `Movies/anyvideo` | `Me at the zoo - jawed [jNQXAC9IVRw].mp4` |
+| YouTube audio | `Music/anyvideo` | `Me at the zoo - jawed [jNQXAC9IVRw].mp3` |
 
 Downloads has separate Photos, Videos and Audio tabs. Swipe left and right to move between them,
 tap a tile to preview it full screen, and long press a tile to select several, then share or delete
@@ -139,8 +140,9 @@ JDK 17 or newer and an Android SDK with API 35. The SDK path goes in `local.prop
 ```
 
 Release signing reads `keystore.properties` from the repository root (`storeFile`, `storePassword`,
-`keyAlias`, `keyPassword`). Without that file the release build falls back to the debug key, which is
-how the APK above was built.
+`keyAlias`, `keyPassword`). Without that file a release build stops before packaging and points at
+`keystore.properties.example`, because a release signed with another key could never update an
+installed copy. Debug builds still use the debug key.
 
 ## Privacy
 
@@ -155,6 +157,8 @@ is why it asks for `MANAGE_EXTERNAL_STORAGE` on Android 11 and newer.
 - A private Instagram download has not been exercised end to end.
 - Instagram endpoints change without notice. When they do, the resolver and the configurable
   extractor are the fallbacks.
+- Some newer Instagram reels come back from the resolver as their cover image. The app refuses to
+  save that still and asks you to sign in to Instagram, which then fetches the video.
 - The app is distributed as an APK because `MANAGE_EXTERNAL_STORAGE` is restricted on Google Play.
 
 ## Project policy
