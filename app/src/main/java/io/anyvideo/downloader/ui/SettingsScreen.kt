@@ -37,8 +37,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.collectAsState
 import io.anyvideo.downloader.BuildConfig
 import io.anyvideo.downloader.update.Updates
@@ -375,7 +373,8 @@ fun SettingsScreen(
                 Text("Updates", fontWeight = FontWeight.SemiBold)
                 Text(
                     "AnyVideo ${BuildConfig.VERSION_NAME}. Updates come from this project's GitHub " +
-                        "releases, because the app is not on Play.",
+                        "releases. The app opens the release page; your browser downloads the APK and " +
+                        "Android installs it, so the app never asks for permission to install packages.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -386,16 +385,8 @@ fun SettingsScreen(
                         is Updates.State.Idle -> "Check to see whether a newer version exists."
                         is Updates.State.Checking -> "Checking GitHub…"
                         is Updates.State.UpToDate -> "You are on the newest version."
-                        is Updates.State.Available -> "Version ${update.release.name} is available."
-                        is Updates.State.Downloading ->
-                            if (update.total > 0) {
-                                "Downloading ${formatBytes(update.received)} of ${formatBytes(update.total)}"
-                            } else {
-                                "Downloading ${formatBytes(update.received)}"
-                            }
-                        is Updates.State.Ready ->
-                            "Version ${update.release.name} is downloaded. Android asks you to " +
-                                "confirm the install."
+                        is Updates.State.Available ->
+                            "Version ${update.release.name} is available on the release page."
                         is Updates.State.Failed -> update.message
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -424,38 +415,15 @@ fun SettingsScreen(
                             )
                         }
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = { scope.launch { Updates.download(context, update.release) } }) {
-                            Text("Download update")
+                        Button(onClick = { Updates.open(context, update.release) }) {
+                            Text("Open release page")
                         }
-                    }
-                    is Updates.State.Downloading -> {
-                        Spacer(Modifier.height(8.dp))
-                        if (update.total > 0) {
-                            LinearProgressIndicator(
-                                progress = { (update.received.toFloat() / update.total).coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        }
-                    }
-                    is Updates.State.Ready -> {
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = {
-                            if (!Updates.install(context, update.file)) {
-                                Toast.makeText(
-                                    context,
-                                    "Allow installs from AnyVideo, then tap Install again",
-                                    Toast.LENGTH_LONG,
-                                ).show()
-                            }
-                        }) { Text("Install update") }
                     }
                     else -> {
                         Spacer(Modifier.height(8.dp))
                         Button(
                             enabled = update !is Updates.State.Checking,
-                            onClick = { scope.launch { Updates.check(context) } },
+                            onClick = { scope.launch { Updates.check() } },
                         ) {
                             Text(
                                 when {

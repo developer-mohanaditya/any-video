@@ -2,13 +2,19 @@ package io.anyvideo.downloader.download
 
 import android.content.ContentValues
 import android.content.Context
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.widget.Toast
 import io.anyvideo.downloader.data.Library
 import io.anyvideo.downloader.net.MediaApi
+import io.anyvideo.downloader.net.YouTubeFormats
 import io.anyvideo.downloader.data.MediaCandidate
 import io.anyvideo.downloader.data.MimeTypes
 import io.anyvideo.downloader.util.Prefs
@@ -25,6 +31,7 @@ import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
@@ -52,6 +59,8 @@ object Downloader {
         val mime: String?,
         val isVideo: Boolean,
         val sourceUrl: String?,
+        val audioUrl: String? = null,
+        val chunked: Boolean = false,
         val state: State = State.QUEUED,
         val received: Long = 0L,
         val total: Long = 0L,
@@ -126,6 +135,8 @@ object Downloader {
             mime = MimeTypes.of(candidate.fileName),
             isVideo = candidate.isVideo,
             sourceUrl = candidate.sourceUrl,
+            audioUrl = candidate.audioUrl,
+            chunked = candidate.chunked,
         )
         _tasks.value = _tasks.value + task
         candidate.sourceUrl?.let { DownloadRegistry.rememberSource(app, it) }
@@ -187,16 +198,35 @@ object Downloader {
     ) {
         try {
             update(task.id) { it.copy(state = State.RUNNING) }
-            val downloaded = downloadTo(
-                url = task.url,
-                headers = headers,
-                cacheDir = File(context.cacheDir, "downloads"),
-                fileName = task.fileName,
-                onProgress = { received, total ->
-                    update(task.id) { it.copy(received = received, total = total) }
-                },
-                publishFile = { file -> publish(context, task, file) },
-            )
+            val downloaded = when {
+                !task.audioUrl.isNullOrBlank() -> downloadMerged(
+                    context = context,
+                    task = task,
+                    headers = headers,
+                    audioUrl = task.audioUrl!!,
+                    onProgress = { received, total ->
+                        update(task.id) { it.copy(received = received, total = total) }
+                    },
+                )
+                task.chunked -> downloadChunked(
+                    context = context,
+                    task = task,
+                    headers = headers,
+                    onProgress = { received, total ->
+                        update(task.id) { it.copy(received = received, total = total) }
+                    },
+                )
+                else -> downloadTo(
+                    url = task.url,
+                    headers = headers,
+                    cacheDir = File(context.cacheDir, "downloads"),
+                    fileName = task.fileName,
+                    onProgress = { received, total ->
+                        update(task.id) { it.copy(received = received, total = total) }
+                    },
+                    publishFile = { file -> publish(context, task, file) },
+                )
+            }
             // Finish with the bytes that actually reached disk, not a missing content length.
             update(task.id) {
                 it.copy(state = State.DONE, received = downloaded, total = downloaded, error = null)
@@ -214,6 +244,47 @@ object Downloader {
                 update(task.id) { it.copy(state = State.QUEUED, received = 0, total = 0) }
                 run(context, task.copy(url = proxied), emptyMap(), viaProxy = true)
             } else if (!viaProxy && !task.retried && isRetryableEmpty(message) && !task.sourceUrl.isNullOrBlank()) {
+                // The resolver's audio tunnel is often empty for the same videos whose video
+                // tunnel fails. Save YouTube's original AAC track as M4A instead.
+                if (task.mime.orEmpty().startsWith("audio/")) {
+                    val direct = runCatching {
+                        YouTubeFormats.directAudio(task.sourceUrl!!)
+                    }.getOrNull()
+                    if (direct != null) {
+                        Toast.makeText(
+                            context,
+                            "Downloading as M4A because the resolver could not convert this audio",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        synchronized(inFlight) {
+                            inFlight.remove("${task.relativePath}/${task.fileName}")
+                            inFlight.add("${task.relativePath}/${direct.fileName}")
+                        }
+                        val retry = task.copy(
+                            url = direct.url,
+                            fileName = direct.fileName,
+                            mime = MimeTypes.of(direct.fileName),
+                            isVideo = false,
+                            audioUrl = null,
+                            chunked = true,
+                            retried = true,
+                        )
+                        update(task.id) {
+                            it.copy(
+                                state = State.RUNNING,
+                                received = 0,
+                                total = 0,
+                                retried = true,
+                                fileName = retry.fileName,
+                                mime = retry.mime,
+                                isVideo = false,
+                            )
+                        }
+                        run(context, retry, direct.headers, viaProxy = false)
+                        return
+                    }
+                }
+
                 // A resolver tunnel URL serves one transfer and then answers with an empty
                 // body. Ask the resolver for a fresh link to the same file and use that.
                 val fresh = runCatching { MediaApi.resolve(task.sourceUrl!!) }.getOrNull()
@@ -288,6 +359,202 @@ object Downloader {
             size
         } finally {
             temp.delete()
+        }
+    }
+
+    /**
+     * YouTube's direct path hands out separate H.264 and AAC files. Download both, merge them
+     * into one MP4, and only then let the normal publisher put it in the gallery.
+     */
+    private suspend fun downloadMerged(
+        context: Context,
+        task: Task,
+        headers: Map<String, String>,
+        audioUrl: String,
+        onProgress: (received: Long, total: Long) -> Unit,
+    ): Long = withContext(Dispatchers.IO) {
+        val dir = File(context.cacheDir, "downloads").apply { mkdirs() }
+        val stamp = System.nanoTime()
+        val videoFile = File(dir, "video-$stamp.mp4")
+        val audioFile = File(dir, "audio-$stamp.m4a")
+        val merged = File(dir, "merged-$stamp.mp4")
+        var videoTotal = 0L
+        var videoDone = 0L
+        var audioTotal = 0L
+        var audioDone = 0L
+        try {
+            val videoSize = fetchToFile(task.url, headers, videoFile) { received, total ->
+                videoDone = received
+                videoTotal = total
+                onProgress(videoDone + audioDone, videoTotal + audioTotal)
+            }
+            val audioSize = fetchToFile(audioUrl, headers, audioFile) { received, total ->
+                audioDone = received
+                audioTotal = total
+                onProgress(videoDone + audioDone, videoTotal + audioTotal)
+            }
+            onProgress(videoSize + audioSize, videoSize + audioSize)
+            mux(videoFile, audioFile, merged)
+            requirePayload(merged)
+            publish(context, task, merged)
+            merged.length()
+        } finally {
+            videoFile.delete()
+            audioFile.delete()
+            merged.delete()
+        }
+    }
+
+    /**
+     * YouTube's audio CDN stops a long connection part way through. Asking for one range at a
+     * time keeps every request short and resumes exactly where the previous one ended.
+     */
+    /** A direct audio file uses the same resumable range fetch as the merged streams. */
+    private suspend fun downloadChunked(
+        context: Context,
+        task: Task,
+        headers: Map<String, String>,
+        onProgress: (received: Long, total: Long) -> Unit,
+    ): Long = withContext(Dispatchers.IO) {
+        val dir = File(context.cacheDir, "downloads").apply { mkdirs() }
+        val temp = File(dir, "direct-${System.nanoTime()}-${task.fileName}")
+        try {
+            fetchToFile(task.url, headers, temp, onProgress)
+            publish(context, task, temp)
+            temp.length()
+        } finally {
+            temp.delete()
+        }
+    }
+
+    private suspend fun fetchToFile(
+        url: String,
+        headers: Map<String, String>,
+        dest: File,
+        onProgress: (received: Long, total: Long) -> Unit,
+    ): Long = withContext(Dispatchers.IO) {
+        val chunk = 512 * 1024L
+        var received = 0L
+        var total = 0L
+        var lastEmit = 0L
+        dest.outputStream().use { output ->
+            while (true) {
+                val end = if (total > 0L) {
+                    (received + chunk - 1).coerceAtMost(total - 1)
+                } else {
+                    received + chunk - 1
+                }
+                val request = Request.Builder().url(url).apply {
+                    headers.forEach { (key, value) -> header(key, value) }
+                    header("Range", "bytes=$received-$end")
+                    header("Accept-Encoding", "identity")
+                }.build()
+                client.newCall(request).execute().use { response ->
+                    if (response.code == 416) {
+                        throw IllegalStateException("The server rejected the resume range")
+                    }
+                    if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
+                    val body = response.body ?: throw IllegalStateException("Empty reply")
+                    val bodyLength = body.contentLength().takeIf { it > 0L } ?: 0L
+                    if (response.code == 200 && received > 0L) {
+                        throw IllegalStateException("The server stopped honouring range requests")
+                    }
+                    if (response.code == 206) {
+                        val fromRange = response.header("Content-Range")
+                            ?.substringAfterLast('/')
+                            ?.toLongOrNull()
+                            ?.takeIf { it > 0L }
+                        if (fromRange != null) total = fromRange
+                    } else if (bodyLength > 0L) {
+                        total = received + bodyLength
+                    }
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            output.write(buffer, 0, read)
+                            received += read
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmit > 120) {
+                                lastEmit = now
+                                onProgress(received, total)
+                            }
+                        }
+                    }
+                    onProgress(received, total)
+                    if (bodyLength == 0L) {
+                        throw IllegalStateException("The server returned an empty range")
+                    }
+                }
+                if (total > 0L && received >= total) break
+                if (total <= 0L && received == 0L) break
+            }
+        }
+        if (total > 0L && received < total) {
+            throw IllegalStateException("Incomplete download ($received of $total bytes)")
+        }
+        requirePayload(dest)
+        dest.length()
+    }
+
+    private fun mux(video: File, audio: File, out: File) {
+        val videoExtractor = MediaExtractor()
+        val audioExtractor = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        var started = false
+        try {
+            videoExtractor.setDataSource(video.absolutePath)
+            audioExtractor.setDataSource(audio.absolutePath)
+            val videoTrack = firstTrack(videoExtractor, "video/")
+                ?: throw IllegalStateException("The video stream has no video track")
+            val audioTrack = firstTrack(audioExtractor, "audio/")
+                ?: throw IllegalStateException("The audio stream has no audio track")
+            val videoFormat = videoExtractor.getTrackFormat(videoTrack)
+            val audioFormat = audioExtractor.getTrackFormat(audioTrack)
+            val target = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = target
+            val videoOut = target.addTrack(videoFormat)
+            val audioOut = target.addTrack(audioFormat)
+            target.start()
+            started = true
+            copySamples(videoExtractor, videoTrack, videoOut, target, videoFormat)
+            copySamples(audioExtractor, audioTrack, audioOut, target, audioFormat)
+        } finally {
+            if (started) runCatching { muxer?.stop() }
+            runCatching { muxer?.release() }
+            videoExtractor.release()
+            audioExtractor.release()
+        }
+    }
+
+    private fun firstTrack(extractor: MediaExtractor, prefix: String): Int? =
+        (0 until extractor.trackCount).firstOrNull {
+            extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)
+                ?.startsWith(prefix) == true
+        }
+
+    private fun copySamples(
+        extractor: MediaExtractor,
+        track: Int,
+        outTrack: Int,
+        muxer: MediaMuxer,
+        format: MediaFormat,
+    ) {
+        extractor.selectTrack(track)
+        val maxInput = if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+            format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+        } else {
+            2 * 1024 * 1024
+        }
+        val buffer = ByteBuffer.allocateDirect(maxInput.coerceAtLeast(2 * 1024 * 1024))
+        val info = MediaCodec.BufferInfo()
+        while (true) {
+            val size = extractor.readSampleData(buffer, 0)
+            if (size < 0) break
+            info.set(0, size, extractor.sampleTime, extractor.sampleFlags)
+            muxer.writeSampleData(outTrack, buffer, info)
+            extractor.advance()
         }
     }
 

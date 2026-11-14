@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.2.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.2-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.5.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.5-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-8.0_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 8.0 and newer" />
 
@@ -15,25 +15,28 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.3.2.apk`, about 1.6 MB.
+The installable file is `AnyVideo-1.3.5.apk`, about 1.7 MB.
 
-- Direct download: [AnyVideo-1.3.2.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.2.apk)
+- Direct download: [AnyVideo-1.3.5.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.5.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.3.2.apk](AnyVideo-1.3.2.apk)
+- Copy in the repository: [AnyVideo-1.3.5.apk](AnyVideo-1.3.5.apk)
 
 Android 8.0 or newer. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
 install from your browser or file manager, and Play Protect may ask you to confirm because the
 app does not come from the Play Store.
 
-After the first install, updates happen inside the app: Settings, Updates, Check for updates.
+After the first install, Settings, Updates, Check for updates opens the GitHub release page. The
+browser downloads the new APK and Android installs it; the app itself does not request permission
+to install packages.
 
 ## What it is
 
 Paste a link, or share one into AnyVideo, and the app finds the media, downloads it itself with a
 live progress bar, and files it in your gallery with the creator's username, or the YouTube video
-title, in the file name. There is no account to create, no advertising SDK and no analytics. Instagram posts can also be resolved on the
-device itself. YouTube, TikTok, X and Pinterest go through a cobalt compatible resolver.
+title, in the file name. There is no account to create, no advertising SDK and no analytics. Instagram posts and YouTube
+videos up to 1080p can also be resolved on the device itself. TikTok, X and Pinterest go through
+a cobalt compatible resolver.
 
 ## What you can do with it
 
@@ -98,8 +101,8 @@ pick to the usual folders.
 | YouTube audio | `Music/anyvideo` | `Me at the zoo - jawed [jNQXAC9IVRw].mp3` |
 
 Downloads has separate Photos, Videos and Audio tabs. Swipe left and right to move between them,
-tap a tile to preview it full screen, and long press a tile to select several, then share or delete
-them together. Active downloads show their progress at the top of the Home and Downloads screens.
+tap a tile to preview it full screen, and swipe left or right again in the preview to move through
+the rest of that tab. Long press a tile to select several, then share or delete them together. Active downloads show their progress at the top of the Home and Downloads screens.
 
 ## Instagram, and the risk that comes with it
 
@@ -113,9 +116,9 @@ the volume low and use an account you can afford to lose.
 ## Settings worth knowing
 
 - **Appearance**: Auto follows the phone, or pin Light or Dark. The choice applies to every screen.
-- **Updates**: checks this project's GitHub releases, shows the notes and size, downloads the APK
-  and hands it to Android's installer. It only installs a file that is AnyVideo signed with the
-  same key as the copy already on the phone.
+- **Updates**: checks this project's GitHub releases and shows the notes and APK size. The button
+  opens the release page in your browser, which downloads the APK for Android's normal installer.
+  Keeping install permission out of the app avoids Play Protect's self-updater warning.
 
 - **Resolver**: base URL and key for a cobalt compatible instance. **Test** calls `GET /` and
   reports the version and the number of services. No instance ships with this source, so set one

@@ -10,7 +10,9 @@ import android.widget.VideoView
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -88,7 +91,9 @@ fun DownloadsScreen() {
     var refreshKey by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     var selection by remember { mutableStateOf<Set<SavedMedia>>(emptySet()) }
-    var preview by remember { mutableStateOf<SavedMedia?>(null) }
+    var previewItems by remember { mutableStateOf<List<SavedMedia>>(emptyList()) }
+    var previewStart by remember { mutableIntStateOf(0) }
+    var previewOpen by remember { mutableStateOf(false) }
 
     val tasks by Downloader.tasks.collectAsState()
     val active = tasks.filter { it.state == Downloader.State.QUEUED || it.state == Downloader.State.RUNNING }
@@ -171,7 +176,11 @@ fun DownloadsScreen() {
                     },
                     refreshKey = refreshKey,
                     selection = selection,
-                    onOpen = { preview = it },
+                    onOpen = { items, media ->
+                        previewItems = items
+                        previewStart = items.indexOfFirst { it.uri == media.uri }.coerceAtLeast(0)
+                        previewOpen = true
+                    },
                     onToggle = { media ->
                         selection = if (media in selection) selection - media else selection + media
                     },
@@ -180,17 +189,18 @@ fun DownloadsScreen() {
         }
     }
 
-    preview?.let { media ->
+    if (previewOpen && previewItems.isNotEmpty()) {
         MediaPreviewDialog(
-            media = media,
-            onDismiss = { preview = null },
-            onShare = {
+            items = previewItems,
+            initialPage = previewStart,
+            onDismiss = { previewOpen = false },
+            onShare = { media ->
                 share(context, media)
-                preview = null
+                previewOpen = false
             },
-            onDelete = {
+            onDelete = { media ->
                 Library.delete(context, media)
-                preview = null
+                previewOpen = false
                 refreshKey++
             },
         )
@@ -251,7 +261,7 @@ private fun MediaPage(
     kind: MediaKind,
     refreshKey: Int,
     selection: Set<SavedMedia>,
-    onOpen: (SavedMedia) -> Unit,
+    onOpen: (List<SavedMedia>, SavedMedia) -> Unit,
     onToggle: (SavedMedia) -> Unit,
 ) {
     val context = LocalContext.current
@@ -286,7 +296,7 @@ private fun MediaPage(
             MediaTile(
                 media = media,
                 chosen = chosen,
-                onClick = { if (selection.isEmpty()) onOpen(media) else onToggle(media) },
+                onClick = { if (selection.isEmpty()) onOpen(items, media) else onToggle(media) },
                 onLongClick = { onToggle(media) },
             )
         }
@@ -421,32 +431,64 @@ private fun SelectionBar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MediaPreviewDialog(
-    media: SavedMedia,
+    items: List<SavedMedia>,
+    initialPage: Int,
     onDismiss: () -> Unit,
-    onShare: () -> Unit,
-    onDelete: () -> Unit,
+    onShare: (SavedMedia) -> Unit,
+    onDelete: (SavedMedia) -> Unit,
 ) {
+    val pager = rememberPagerState(
+        initialPage = initialPage.coerceIn(0, items.lastIndex),
+        pageCount = { items.size },
+    )
+    var zoomed by remember { mutableStateOf(false) }
+    LaunchedEffect(pager.currentPage) { zoomed = false }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            if (media.kind == MediaKind.PHOTO) {
-                ZoomableImage(media)
-            } else {
-                VideoSurface(media)
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.fillMaxSize(),
+                userScrollEnabled = !zoomed,
+            ) { page ->
+                val media = items[page]
+                if (media.kind == MediaKind.PHOTO) {
+                    ZoomableImage(
+                        media = media,
+                        onZoomChanged = { active ->
+                            if (page == pager.currentPage) zoomed = active
+                        },
+                    )
+                } else {
+                    VideoSurface(media)
+                }
+            }
+
+            val current = items[pager.currentPage.coerceIn(0, items.lastIndex)]
+            val duration = rememberMediaDuration(current)
+
+            if (items.size > 1) {
+                Text(
+                    "${pager.currentPage + 1} / ${items.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 20.dp),
+                )
             }
 
             Row(
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onShare) {
+                IconButton(onClick = { onShare(current) }) {
                     Icon(Icons.Filled.Share, contentDescription = "Share", tint = Color.White)
                 }
-                IconButton(onClick = onDelete) {
+                IconButton(onClick = { onDelete(current) }) {
                     Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = Color.White)
                 }
                 IconButton(onClick = onDismiss) {
@@ -454,36 +496,73 @@ private fun MediaPreviewDialog(
                 }
             }
 
-            Text(
-                media.name,
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White,
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-            )
+            ) {
+                Text(
+                    current.name,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (duration != null) {
+                    Text(
+                        formatDuration(duration),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.75f),
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun ZoomableImage(media: SavedMedia) {
-    var scale by remember { mutableStateOf(1f) }
-    var offsetX by remember { mutableStateOf(0f) }
-    var offsetY by remember { mutableStateOf(0f) }
+private fun ZoomableImage(
+    media: SavedMedia,
+    onZoomChanged: (Boolean) -> Unit = {},
+) {
+    var scale by remember(media.uri) { mutableStateOf(1f) }
+    var offsetX by remember(media.uri) { mutableStateOf(0f) }
+    var offsetY by remember(media.uri) { mutableStateOf(0f) }
+
+    LaunchedEffect(media.uri) {
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+        onZoomChanged(false)
+    }
+    LaunchedEffect(scale) { onZoomChanged(scale > 1f) }
+
     AsyncImage(
         model = media.uri,
         contentDescription = media.name,
         contentScale = ContentScale.Fit,
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 5f)
-                    if (scale > 1f) {
-                        offsetX += pan.x
-                        offsetY += pan.y
-                    } else {
-                        offsetX = 0f
-                        offsetY = 0f
+            .pointerInput(media.uri) {
+                awaitEachGesture {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.count { it.pressed }
+                        if (pressed == 0) break
+                        val zoomChange = event.calculateZoom()
+                        val pan = event.calculatePan()
+                        // At normal size a one finger drag belongs to the pager, so only a
+                        // pinch or a pan while zoomed consumes the gesture.
+                        if (pressed > 1 || scale > 1f) {
+                            scale = (scale * zoomChange).coerceIn(1f, 5f)
+                            if (scale > 1f) {
+                                offsetX += pan.x
+                                offsetY += pan.y
+                            } else {
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                            event.changes.forEach { if (it.pressed) it.consume() }
+                        }
                     }
                 }
             }
@@ -494,6 +573,33 @@ private fun ZoomableImage(media: SavedMedia) {
                 translationY = offsetY,
             ),
     )
+}
+
+/** The player's own controls show a countdown, so the preview also labels the full length. */
+@Composable
+private fun rememberMediaDuration(media: SavedMedia): Long? {
+    val context = LocalContext.current
+    var duration by remember(media.uri) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(media.uri, media.kind) {
+        duration = if (media.kind == MediaKind.PHOTO) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(context, media.uri)
+                        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                            ?.toLongOrNull()
+                            ?.takeIf { it > 0L }
+                    } finally {
+                        retriever.release()
+                    }
+                }.getOrNull()
+            }
+        }
+    }
+    return duration
 }
 
 @Composable

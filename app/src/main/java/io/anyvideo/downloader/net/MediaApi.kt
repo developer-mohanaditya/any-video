@@ -9,6 +9,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
+ * Choices for one YouTube request. The picker can lower an audio target for the current video
+ * without overwriting the user's saved preference for the next one.
+ */
+data class YouTubeChoice(
+    val audioOnly: Boolean,
+    val quality: String,
+    val audioFormat: String,
+    val audioBitrate: String,
+)
+
+/**
  * Client for a cobalt-compatible resolver API (https://github.com/imputnet/cobalt).
  *
  * The API is one endpoint, `POST <base>/`, answering JSON whose `status` decides the shape:
@@ -38,34 +49,41 @@ object MediaApi {
      * well as the link: resolving a video and then switching to audio must not hand back the
      * first answer, which is a `.mp4` whose tunnel URL may already be spent.
      */
-    fun variant(pageUrl: String): String = if (audioRequest(pageUrl)) {
-        "audio/${Prefs.youtubeAudioFormat}/${Prefs.youtubeAudioBitrate}"
-    } else {
-        "auto/${Prefs.youtubeQuality}"
+    fun variant(pageUrl: String, choice: YouTubeChoice? = null): String {
+        val options = requestOptions(pageUrl, choice)
+        return if (options.audioOnly) {
+            "audio/${options.audioFormat}/${options.audioBitrate}"
+        } else {
+            "auto/${options.quality}"
+        }
     }
 
-    suspend fun resolve(pageUrl: String): Outcome = withContext(Dispatchers.IO) {
+    suspend fun resolve(
+        pageUrl: String,
+        choice: YouTubeChoice? = null,
+    ): Outcome = withContext(Dispatchers.IO) {
         val base = Prefs.resolverApiBase
         if (base.isEmpty()) return@withContext Outcome(emptyList(), UNCONFIGURED)
 
         // YouTube is the one service where cobalt lets the caller choose: a height such as
         // "1080" (or "max"), and `downloadMode=audio` to get just the soundtrack. Both come
-        // from the chooser on the home screen.
-        val audioOnly = audioRequest(pageUrl)
+        // from the chooser on the home screen. A choice applies only to this request, so a
+        // lower bitrate for one video does not replace the saved preference.
+        val options = requestOptions(pageUrl, choice)
         val payload = JSONObject()
             .put("url", pageUrl)
             // Ask for the best file the instance can serve; the picker path then hands us
-            // every carousel child instead of a single merged file.
-            .put("videoQuality", if (audioOnly) "max" else Prefs.youtubeQuality)
-            .put("downloadMode", if (audioOnly) "audio" else "auto")
+            // every carousel child instead of a single merged file. Nothing above 8K is sent.
+            .put("videoQuality", if (options.audioOnly) "max" else options.quality)
+            .put("downloadMode", if (options.audioOnly) "audio" else "auto")
             .put("filenameStyle", "basic")
             .put("alwaysProxy", true)
             .apply {
-                if (audioOnly) {
-                    put("audioFormat", Prefs.youtubeAudioFormat)
+                if (options.audioOnly) {
+                    put("audioFormat", options.audioFormat)
                     // Without this the instance falls back to 128 kbps for every conversion,
                     // whatever the chooser said.
-                    put("audioBitrate", Prefs.youtubeAudioBitrate)
+                    put("audioBitrate", options.audioBitrate)
                 }
             }
             .toString()
@@ -87,15 +105,32 @@ object MediaApi {
                 retryable = reply.code >= 500,
             )
         }
-        parse(body, pageUrl, audioOnly)
+        parse(body, pageUrl, options.audioOnly, options.audioFormat)
     }
 
     private fun isYouTube(pageUrl: String): Boolean =
         hostOf(pageUrl).let { it.contains("youtube") || it.contains("youtu.be") }
 
-    /** True when this link will be resolved as a soundtrack rather than a video. */
-    private fun audioRequest(pageUrl: String): Boolean =
-        Prefs.youtubeAudioOnly && isYouTube(pageUrl)
+    private data class RequestOptions(
+        val audioOnly: Boolean,
+        val quality: String,
+        val audioFormat: String,
+        val audioBitrate: String,
+    )
+
+    /** Choice for this request only, with saved preferences as the fallback. */
+    private fun requestOptions(pageUrl: String, choice: YouTubeChoice?): RequestOptions {
+        val youtube = isYouTube(pageUrl)
+        val youtubeChoice = choice?.takeIf { youtube }
+        return RequestOptions(
+            audioOnly = youtube && (youtubeChoice?.audioOnly ?: Prefs.youtubeAudioOnly),
+            quality = YouTubeFormats.cappedQuality(
+                youtubeChoice?.quality ?: Prefs.youtubeQuality,
+            ),
+            audioFormat = youtubeChoice?.audioFormat ?: Prefs.youtubeAudioFormat,
+            audioBitrate = youtubeChoice?.audioBitrate ?: Prefs.youtubeAudioBitrate,
+        )
+    }
 
     /** Accepts a bare key, `Api-Key <key>` or a ready-made `Bearer <token>` (turnstile sessions). */
     private fun authorize(value: String): String = when {
@@ -103,7 +138,12 @@ object MediaApi {
         else -> "Api-Key $value"
     }
 
-    private fun parse(body: String, pageUrl: String, audioOnly: Boolean): Outcome {
+    private fun parse(
+        body: String,
+        pageUrl: String,
+        audioOnly: Boolean,
+        audioFormat: String,
+    ): Outcome {
         val root = try {
             JSONObject(body)
         } catch (t: Throwable) {
@@ -115,7 +155,19 @@ object MediaApi {
                 val url = root.optString("url")
                 if (url.isBlank()) return Outcome(emptyList(), "the resolver API returned no file URL")
                 val isVideo = isVideoFile(url) || isVideoFile(root.optString("filename"))
-                Outcome(listOf(candidate(url, root.optString("filename"), pageUrl, 0, isVideo, audioOnly = audioOnly)))
+                Outcome(
+                    listOf(
+                        candidate(
+                            url = url,
+                            apiName = root.optString("filename"),
+                            pageUrl = pageUrl,
+                            index = 0,
+                            isVideo = isVideo,
+                            audioOnly = audioOnly,
+                            audioFormat = audioFormat,
+                        ),
+                    ),
+                )
             }
 
             "picker" -> {
@@ -134,6 +186,7 @@ object MediaApi {
                         isVideo = isVideo,
                         thumbnail = entry.optString("thumb").takeIf { it.isNotBlank() },
                         audioOnly = audioOnly,
+                        audioFormat = audioFormat,
                     )
                 }
                 if (items.isEmpty()) Outcome(emptyList(), "the resolver API found nothing in that link")
@@ -158,7 +211,15 @@ object MediaApi {
                 val isVideo = mime.startsWith("video/") || isVideoFile(url)
                 Outcome(
                     listOf(
-                        candidate(url, output?.optString("filename"), pageUrl, 0, isVideo, audioOnly = audioOnly),
+                        candidate(
+                            url = url,
+                            apiName = output?.optString("filename"),
+                            pageUrl = pageUrl,
+                            index = 0,
+                            isVideo = isVideo,
+                            audioOnly = audioOnly,
+                            audioFormat = audioFormat,
+                        ),
                     ),
                 )
             }
@@ -228,12 +289,13 @@ object MediaApi {
         isVideo: Boolean,
         thumbnail: String? = null,
         audioOnly: Boolean = false,
+        audioFormat: String,
     ): MediaCandidate {
         // An audio reply's tunnel URL carries no extension, so fall back to the format we asked
         // for instead of naming a soundtrack .jpg. The request value is not an extension:
         // "best" means the untouched m4a stream, and naming a file `.best` makes it unplayable.
         val extension = extensionOf(apiName) ?: extensionOf(url)
-            ?: if (audioOnly) audioExtensionFor(Prefs.youtubeAudioFormat)
+            ?: if (audioOnly) audioExtensionFor(audioFormat)
             else if (isVideo) "mp4" else "jpg"
         val user = userFor(pageUrl)
         // A link whose id cannot be parsed still gets a stable name, so resolving it twice does

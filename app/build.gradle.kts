@@ -63,8 +63,8 @@ android {
         applicationId = "io.anyvideo.downloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.3.2"
+        versionCode = 14
+        versionName = "1.3.5"
 
         buildConfigField("String", "DEFAULT_RESOLVER_API", "\"$bakedResolver\"")
     }
@@ -123,4 +123,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    // The app uses Android's org.json; the unit tests need the real implementation on the JVM.
+    testImplementation("org.json:json:20240303")
 }

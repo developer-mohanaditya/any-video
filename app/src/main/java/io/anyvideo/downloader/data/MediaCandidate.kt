@@ -13,6 +13,10 @@ data class MediaCandidate(
     val isVideo: Boolean = false,
     val sourceUrl: String? = null,
     val headers: Map<String, String> = emptyMap(),
+    /** Separate audio stream to merge with [url], used by the direct YouTube path. */
+    val audioUrl: String? = null,
+    /** Download in short range requests, needed for YouTube's throttled audio CDN. */
+    val chunked: Boolean = false,
 )
 
 object FileNames {

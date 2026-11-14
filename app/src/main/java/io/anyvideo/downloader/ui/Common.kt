@@ -311,6 +311,19 @@ fun ActiveDownloadStrip(tasks: List<io.anyvideo.downloader.download.Downloader.T
     }
 }
 
+/** Durations use hours only when needed, with minutes and seconds always two digits. */
+fun formatDuration(milliseconds: Long): String {
+    val totalSeconds = (milliseconds / 1000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(java.util.Locale.US, "%d:%02d", minutes, seconds)
+    }
+}
+
 /** Sizes read best in the unit that keeps the number short: KB, then MB, then GB. */
 fun formatBytes(bytes: Long): String {
     if (bytes < 1024L) return "$bytes B"

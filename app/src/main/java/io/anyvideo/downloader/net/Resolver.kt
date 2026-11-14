@@ -2,6 +2,7 @@ package io.anyvideo.downloader.net
 
 import android.app.Activity
 import io.anyvideo.downloader.data.MediaCandidate
+import io.anyvideo.downloader.util.Prefs
 import kotlinx.coroutines.delay
 import java.util.concurrent.ConcurrentHashMap
 
@@ -33,12 +34,14 @@ object Resolver {
      * The link plus the options that change the answer. Without the variant, asking for audio
      * right after a video resolve returns the cached video reply.
      */
-    private fun key(url: String): String = "$url#${MediaApi.variant(url)}"
+    private fun key(url: String, choice: YouTubeChoice?): String =
+        "$url#${MediaApi.variant(url, choice)}"
 
-    private fun cached(url: String): ResolveOutcome? {
-        val entry = cache[key(url)] ?: return null
+    private fun cached(url: String, choice: YouTubeChoice?): ResolveOutcome? {
+        val cacheKey = key(url, choice)
+        val entry = cache[cacheKey] ?: return null
         if (System.currentTimeMillis() - entry.at > CACHE_TTL_MS) {
-            cache.remove(key(url))
+            cache.remove(cacheKey)
             return null
         }
         return entry.outcome
@@ -47,9 +50,9 @@ object Resolver {
     /** Drops every remembered reply, e.g. after a download failed on a stale tunnel URL. */
     fun invalidate() = cache.clear()
 
-    private fun remember(url: String, outcome: ResolveOutcome) {
+    private fun remember(url: String, choice: YouTubeChoice?, outcome: ResolveOutcome) {
         if (outcome.candidates.isEmpty()) return
-        cache[key(url)] = CacheEntry(System.currentTimeMillis(), outcome)
+        cache[key(url, choice)] = CacheEntry(System.currentTimeMillis(), outcome)
         if (cache.size > CACHE_ENTRIES) {
             val cutoff = System.currentTimeMillis() - CACHE_TTL_MS
             cache.entries.removeAll { it.value.at < cutoff }
@@ -76,16 +79,20 @@ object Resolver {
         }
     }
 
-    suspend fun resolve(activity: Activity, rawUrl: String): ResolveOutcome {
+    suspend fun resolve(
+        activity: Activity,
+        rawUrl: String,
+        choice: YouTubeChoice? = null,
+    ): ResolveOutcome {
         // Only Instagram links get their query stripped: `watch?v=…` and `status/…` carry the
         // identity of the post, so normalising those would break every non-Instagram link.
         val trimmed = rawUrl.trim()
         val url = if (Instagram.isInstagram(trimmed)) normalize(trimmed) else trimmed
         if (url.isBlank()) return ResolveOutcome(emptyList(), "Paste a link to download from.")
 
-        cached(url)?.let { return it }
-        val outcome = lookup(activity, trimmed, url)
-        remember(url, outcome)
+        cached(url, choice)?.let { return it }
+        val outcome = lookup(activity, trimmed, url, choice)
+        remember(url, choice, outcome)
         return outcome
     }
 
@@ -95,7 +102,12 @@ object Resolver {
         return path.contains("/reel/") || path.contains("/reels/") || path.contains("/tv/")
     }
 
-    private suspend fun lookup(activity: Activity, rawUrl: String, url: String): ResolveOutcome {
+    private suspend fun lookup(
+        activity: Activity,
+        rawUrl: String,
+        url: String,
+        choice: YouTubeChoice?,
+    ): ResolveOutcome {
         // Cobalt does not handle story links, so resolve those directly before asking the API
         // and getting its "link unsupported" answer.
         if (Instagram.isInstagram(url)) {
@@ -108,6 +120,18 @@ object Resolver {
             }
         }
 
+        // YouTube's visionOS player returns full H.264/AAC streams even for videos the resolver
+        // cannot fetch. Video only, up to 1080p; audio and 4K stay on the resolver.
+        if (YouTubeFormats.videoId(url) != null &&
+            !(choice?.audioOnly ?: Prefs.youtubeAudioOnly)
+        ) {
+            val direct = YouTubeFormats.direct(
+                url,
+                choice?.quality ?: Prefs.youtubeQuality,
+            )
+            if (direct != null) return ResolveOutcome(listOf(direct), "Resolved directly from YouTube")
+        }
+
         // The resolver API is the widest net (Instagram, YouTube, X, Pinterest, …), so it goes
         // first; its failure reason is kept in case the on-device paths find nothing either.
         var apiError: String? = null
@@ -116,7 +140,7 @@ object Resolver {
             // a couple of seconds, so those are retried here and the user never sees them.
             var attempt = 0
             while (true) {
-                val api = MediaApi.resolve(rawUrl)
+                val api = MediaApi.resolve(rawUrl, choice)
                 if (api.candidates.isNotEmpty()) {
                     // The API sometimes answers a reel or a TV post with its cover image only.
                     // That is a photo of the video, not the video, so the on-device Instagram
@@ -151,6 +175,17 @@ object Resolver {
                     else BACKOFF_MS[attempt.coerceAtMost(BACKOFF_MS.lastIndex)],
                 )
                 attempt++
+            }
+        }
+
+        // Audio-only YouTube still goes to the resolver first so MP3 and OGG keep working.
+        // When it cannot produce anything, save the original AAC track as M4A instead.
+        if (YouTubeFormats.videoId(url) != null &&
+            (choice?.audioOnly ?: Prefs.youtubeAudioOnly)
+        ) {
+            val directAudio = YouTubeFormats.directAudio(url)
+            if (directAudio != null) {
+                return ResolveOutcome(listOf(directAudio), "Saved M4A directly from YouTube")
             }
         }
 

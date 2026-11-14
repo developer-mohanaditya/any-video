@@ -91,7 +91,10 @@ import io.anyvideo.downloader.data.MediaCandidate
 import io.anyvideo.downloader.download.Downloader
 import io.anyvideo.downloader.download.DownloadRegistry
 import io.anyvideo.downloader.net.Resolver
+import io.anyvideo.downloader.net.YouTubeChoice
+import io.anyvideo.downloader.net.YouTubeFormats
 import io.anyvideo.downloader.util.Prefs
+import io.anyvideo.downloader.util.audioBitrateToSave
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -141,6 +144,11 @@ fun HomeScreen(
     var waitingForGallery by remember { mutableStateOf(false) }
     var recent by remember { mutableStateOf(listOf<RecentProfile>()) }
     var pendingYouTube by remember { mutableStateOf<String?>(null) }
+    /** Real formats reported for the pending YouTube link; null means the probe failed. */
+    var youtubeAvailability by remember {
+        mutableStateOf<YouTubeFormats.Availability?>(null)
+    }
+    var checkingYouTube by remember { mutableStateOf(false) }
     /** The last link we acted on, so auto-save fires once per paste instead of on every keystroke. */
     var handled by remember { mutableStateOf("") }
     /** Pending auto-resolve, cancelled on every edit so typing one URL costs one request. */
@@ -167,7 +175,11 @@ fun HomeScreen(
             .filter { it.startsWith("http", true) && Resolver.isSupported(it) }
             .distinct()
 
-    fun fetch(target: String, auto: Boolean = false) {
+    fun fetch(
+        target: String,
+        auto: Boolean = false,
+        youtubeChoice: YouTubeChoice? = null,
+    ) {
         val links = linksFrom(target).ifEmpty { listOf(target.trim()) }.filter { it.isNotBlank() }
         if (links.isEmpty()) {
             message = "Paste a link first."
@@ -182,7 +194,7 @@ fun HomeScreen(
             val found = ArrayList<MediaCandidate>()
             var note: String? = null
             for (url in links) {
-                val outcome = Resolver.resolve(activity, url)
+                val outcome = Resolver.resolve(activity, url, youtubeChoice)
                 found += outcome.candidates
                 if (outcome.candidates.isEmpty() && note == null) note = outcome.note
             }
@@ -223,6 +235,18 @@ fun HomeScreen(
         }
         if (isYouTubeLink(target)) {
             pendingYouTube = target
+            youtubeAvailability = null
+            checkingYouTube = true
+            // Ask which qualities this particular video has before offering a choice. The
+            // dialog is already visible, so a slow probe shows its own loading row instead of
+            // presenting a 4K option that may not exist.
+            scope.launch {
+                val availability = YouTubeFormats.available(target)
+                if (pendingYouTube == target) {
+                    youtubeAvailability = availability
+                    checkingYouTube = false
+                }
+            }
         } else {
             // The debounce above already saved this exact link; a tap on the arrow must not
             // enqueue the same carousel a second time.
@@ -264,16 +288,33 @@ fun HomeScreen(
 
     pendingYouTube?.let { target ->
         YouTubePickerDialog(
-            onDismiss = { pendingYouTube = null },
-            onConfirm = { audio, quality, format, bitrate ->
-                Prefs.youtubeAudioOnly = audio
-                Prefs.youtubeQuality = quality
-                Prefs.youtubeAudioFormat = format
-                Prefs.youtubeAudioBitrate = bitrate
+            availableHeights = youtubeAvailability?.heights.orEmpty(),
+            audioKbps = youtubeAvailability?.audioKbps,
+            probed = youtubeAvailability != null,
+            checking = checkingYouTube,
+            onDismiss = {
                 pendingYouTube = null
+                checkingYouTube = false
+            },
+            onConfirm = { audio, quality, format, bitrate, bitrateChosen ->
+                val cappedQuality = YouTubeFormats.cappedQuality(quality)
+                Prefs.youtubeAudioOnly = audio
+                Prefs.youtubeQuality = cappedQuality
+                Prefs.youtubeAudioFormat = format
+                Prefs.youtubeAudioBitrate = audioBitrateToSave(
+                    saved = Prefs.youtubeAudioBitrate,
+                    effective = bitrate,
+                    explicitlyChosen = bitrateChosen,
+                )
+                pendingYouTube = null
+                checkingYouTube = false
                 handled = target
                 hideKeyboard()
-                fetch(target, auto = true)
+                fetch(
+                    target = target,
+                    auto = true,
+                    youtubeChoice = YouTubeChoice(audio, cappedQuality, format, bitrate),
+                )
             },
         )
     }
@@ -832,17 +873,9 @@ private fun RecentProfileBubble(profile: RecentProfile, onClick: () -> Unit) {
     }
 }
 
-private val VIDEO_QUALITIES = listOf(
-    "max" to "Best",
-    "2160" to "2160p",
-    "1440" to "1440p",
-    "1080" to "1080p",
-    "720" to "720p",
-    "480" to "480p",
-    "360" to "360p",
-    "240" to "240p",
-    "144" to "144p",
-)
+/** "Best" lets the resolver choose the highest stream the video actually has. */
+private fun qualityOptions(heights: List<Int>): List<Pair<String, String>> =
+    listOf("max" to "Best") + heights.map { it.toString() to "${it}p" }
 
 /** cobalt's audioFormat values; "best" gives the original muxed audio stream. */
 private val AUDIO_FORMATS = listOf(
@@ -864,16 +897,62 @@ private val AUDIO_BITRATES = listOf(
     "96" to "96k",
 )
 
+/**
+ * Cobalt targets that fit the source audio. A 148 kbps source cannot gain quality from a 320 kbps
+ * encode. If the source is below every target, keep the smallest so audio can still convert.
+ */
+private fun audioBitrateOptions(audioKbps: Int?, probed: Boolean): List<Pair<String, String>> {
+    if (!probed) return AUDIO_BITRATES
+    if (audioKbps == null) return emptyList()
+    val withinSource = AUDIO_BITRATES.filter { it.first.toInt() <= audioKbps }
+    return withinSource.ifEmpty { listOf(AUDIO_BITRATES.last()) }
+}
+
 /** Asks for video quality or audio format before a YouTube link is resolved. */
 @Composable
 private fun YouTubePickerDialog(
+    availableHeights: List<Int>,
+    audioKbps: Int?,
+    probed: Boolean,
+    checking: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (audio: Boolean, quality: String, format: String, bitrate: String) -> Unit,
+    onConfirm: (
+        audio: Boolean,
+        quality: String,
+        format: String,
+        bitrate: String,
+        bitrateChosen: Boolean,
+    ) -> Unit,
 ) {
     var audio by remember { mutableStateOf(Prefs.youtubeAudioOnly) }
     var quality by remember { mutableStateOf(Prefs.youtubeQuality) }
     var format by remember { mutableStateOf(Prefs.youtubeAudioFormat) }
     var bitrate by remember { mutableStateOf(Prefs.youtubeAudioBitrate) }
+    /** True only when the user tapped a bitrate chip; auto-fallback is not a preference. */
+    var bitrateChosen by remember { mutableStateOf(false) }
+
+    // If the saved choice is not present for this video, ask the resolver for its best stream
+    // instead of sending a height that cannot be fulfilled.
+    LaunchedEffect(checking, availableHeights) {
+        if (!checking && quality != "max" &&
+            (availableHeights.isEmpty() || quality.toIntOrNull() !in availableHeights)
+        ) {
+            quality = "max"
+        }
+    }
+
+    val bitrateOptions = audioBitrateOptions(audioKbps, probed)
+    // A successful probe with no audio track means audio cannot be downloaded. A failed probe
+    // stays permissive and uses the standard conversion targets.
+    val audioAvailable = !probed || audioKbps != null
+
+    // Keep the selected bitrate on an option this video can actually offer.
+    LaunchedEffect(checking, probed, audioKbps, format) {
+        if (checking || format == "best" || bitrateOptions.isEmpty()) return@LaunchedEffect
+        if (bitrateOptions.none { it.first == bitrate }) {
+            bitrate = bitrateOptions.first().first
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -887,47 +966,145 @@ private fun YouTubePickerDialog(
                     OptionChip("Audio", audio) { audio = true }
                 }
                 Spacer(Modifier.height(14.dp))
-                Text(
-                    if (audio) "Audio format" else "Video quality",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-                val options = if (audio) AUDIO_FORMATS else VIDEO_QUALITIES
-                options.chunked(3).forEach { rowOptions ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        rowOptions.forEach { (value, label) ->
-                            val selected = if (audio) format == value else quality == value
-                            OptionChip(label, selected) {
-                                if (audio) format = value else quality = value
+                if (audio) {
+                    when {
+                        checking -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Checking available audio…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        probed && audioKbps == null -> Text(
+                            "This video does not report an audio track.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        else -> {
+                            Text(
+                                "Audio format",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            AUDIO_FORMATS.chunked(3).forEach { rowOptions ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    rowOptions.forEach { (value, label) ->
+                                        OptionChip(label, format == value) { format = value }
+                                    }
+                                }
+                                Spacer(Modifier.height(6.dp))
+                            }
+                            Text(
+                                "MP3, OGG and WAV need the resolver. If it cannot convert this " +
+                                    "video, the original track is saved as M4A.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(8.dp))
+
+                            // "best" keeps the original stream, where a bitrate choice would do
+                            // nothing.
+                            if (format != "best") {
+                                Text(
+                                    "Audio bitrate",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    when {
+                                        probed && audioKbps != null ->
+                                            "Source audio: up to ${audioKbps}k. Available " +
+                                                "conversion targets are shown."
+                                        else -> "Could not check source audio. Standard " +
+                                            "conversion targets are shown."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                bitrateOptions.chunked(3).forEach { rowOptions ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        rowOptions.forEach { (value, label) ->
+                                            OptionChip(label, bitrate == value) {
+                                                bitrate = value
+                                                bitrateChosen = true
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                            } else {
+                                Text(
+                                    "M4A keeps the original audio stream.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }
-                    Spacer(Modifier.height(6.dp))
-                }
-
-
-                // "best" keeps the original stream, where a bitrate choice would do nothing.
-                if (audio && format != "best") {
+                } else {
                     Text(
-                        "Audio bitrate",
+                        "Video quality",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
-                    AUDIO_BITRATES.chunked(3).forEach { rowOptions ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            rowOptions.forEach { (value, label) ->
-                                OptionChip(label, bitrate == value) { bitrate = value }
-                            }
+                    if (checking) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Checking available qualities…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        Spacer(Modifier.height(6.dp))
+                    } else {
+                        if (availableHeights.isEmpty()) {
+                            Text(
+                                if (probed) {
+                                    "YouTube did not report separate qualities for this video. " +
+                                        "Best available will be used."
+                                } else {
+                                    "Could not check this video's qualities. Best available " +
+                                        "will be used."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+                        qualityOptions(availableHeights).chunked(3).forEach { rowOptions ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                rowOptions.forEach { (value, label) ->
+                                    OptionChip(label, quality == value) { quality = value }
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(audio, quality, format, bitrate) }) { Text("Download") }
+            TextButton(
+                onClick = { onConfirm(audio, quality, format, bitrate, bitrateChosen) },
+                // Neither choice may be confirmed while the real lists are unknown. A probe that
+                // succeeded without an audio track disables the audio download outright.
+                enabled = !checking && (!audio || audioAvailable),
+            ) { Text("Download") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

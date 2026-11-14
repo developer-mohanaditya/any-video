@@ -4,6 +4,7 @@ import io.anyvideo.downloader.data.FileNames
 import io.anyvideo.downloader.net.Instagram
 import io.anyvideo.downloader.net.MediaApi
 import io.anyvideo.downloader.net.Resolver
+import io.anyvideo.downloader.ui.formatDuration
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -19,6 +20,15 @@ class CoreLogicTest {
         val (user, id) = FileNames.parse(name)
         assertEquals("some.user", user)
         assertEquals("C1a2B3c4", id)
+    }
+
+    @Test
+    fun `duration is shown as minutes and seconds, or hours when needed`() {
+        assertEquals("0:00", formatDuration(0))
+        assertEquals("1:01", formatDuration(61_000))
+        assertEquals("59:59", formatDuration(3_599_000))
+        assertEquals("1:01:01", formatDuration(3_661_000))
+        assertEquals("2:00:00", formatDuration(7_200_000))
     }
 
     @Test

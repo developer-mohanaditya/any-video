@@ -2,11 +2,7 @@ package io.anyvideo.downloader.update
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
-import android.provider.Settings
-import androidx.core.content.FileProvider
 import io.anyvideo.downloader.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,27 +12,25 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * The app is not on Play, so it updates from its own GitHub releases. This checks the latest
- * release, downloads its APK, proves the file is this app signed with the same key, and then
- * hands it to Android's installer, which does the replacing.
+ * The app is not on Play, so it checks its own GitHub releases. It deliberately does not download
+ * or install APKs: that needs REQUEST_INSTALL_PACKAGES and makes Play Protect treat the app as a
+ * self-updater. The release page opens in the browser instead, and Android or the browser handles
+ * the download and the normal installer prompt.
  */
 object Updates {
 
     private const val API = "https://api.github.com/repos/developer-mohanaditya/any-video/releases/latest"
 
-    data class Release(val name: String, val notes: String, val url: String, val size: Long)
+    data class Release(val name: String, val notes: String, val pageUrl: String, val size: Long)
 
     sealed interface State {
         data object Idle : State
         data object Checking : State
         data object UpToDate : State
         data class Available(val release: Release) : State
-        data class Downloading(val received: Long, val total: Long) : State
-        data class Ready(val release: Release, val file: File) : State
         data class Failed(val message: String) : State
     }
 
@@ -67,10 +61,10 @@ object Updates {
     }
 
     fun reset() {
-        if (_state.value !is State.Downloading) _state.value = State.Idle
+        if (_state.value !is State.Checking) _state.value = State.Idle
     }
 
-    suspend fun check(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun check() = withContext(Dispatchers.IO) {
         _state.value = State.Checking
         val result = runCatching {
             val request = Request.Builder()
@@ -85,22 +79,20 @@ object Updates {
                 if (tag.isBlank()) error("The release has no version tag")
                 if (!isNewer(tag, BuildConfig.VERSION_NAME)) return@runCatching null
                 val assets = root.optJSONArray("assets") ?: error("The release has no files")
-                var apkUrl = ""
                 var apkSize = 0L
                 for (index in 0 until assets.length()) {
                     val asset = assets.getJSONObject(index)
-                    val name = asset.optString("name")
-                    if (name.endsWith(".apk", true)) {
-                        apkUrl = asset.optString("browser_download_url")
+                    if (asset.optString("name").endsWith(".apk", true)) {
                         apkSize = asset.optLong("size")
                         break
                     }
                 }
-                if (apkUrl.isBlank()) error("The release has no APK")
                 Release(
                     name = tag.removePrefix("v"),
                     notes = root.optString("body").trim(),
-                    url = apkUrl,
+                    pageUrl = root.optString("html_url").ifBlank {
+                        "https://github.com/developer-mohanaditya/any-video/releases/tag/$tag"
+                    },
                     size = apkSize,
                 )
             }
@@ -111,91 +103,10 @@ object Updates {
         )
     }
 
-    suspend fun download(context: Context, release: Release) = withContext(Dispatchers.IO) {
-        val folder = File(context.cacheDir, "updates").apply { mkdirs() }
-        val file = File(folder, "AnyVideo-${release.name}.apk")
-        val result = runCatching {
-            val request = Request.Builder()
-                .url(release.url)
-                .header("Accept", "application/octet-stream")
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) error("The download answered ${response.code}")
-                val body = response.body ?: error("The download was empty")
-                val total = if (release.size > 0) release.size else body.contentLength().coerceAtLeast(0L)
-                file.outputStream().use { output ->
-                    body.byteStream().use { input ->
-                        val buffer = ByteArray(64 * 1024)
-                        var received = 0L
-                        var lastPost = 0L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            output.write(buffer, 0, read)
-                            received += read
-                            val now = System.currentTimeMillis()
-                            if (now - lastPost > 120) {
-                                lastPost = now
-                                _state.value = State.Downloading(received, total)
-                            }
-                        }
-                        _state.value = State.Downloading(received, total)
-                    }
-                }
-            }
-            if (file.length() <= 0L) error("The downloaded file is empty")
-            if (!isOurApp(context, file)) {
-                file.delete()
-                error("That file is not AnyVideo signed with this app's key")
-            }
-            file
-        }
-        _state.value = result.fold(
-            onSuccess = { State.Ready(release, it) },
-            onFailure = { State.Failed(it.message ?: "The download failed") },
-        )
-    }
-
-    /** The archive must carry this package name and this app's signing certificate. */
-    private fun isOurApp(context: Context, file: File): Boolean {
-        val manager = context.packageManager
-        val archive = manager.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES)
-            ?: return false
-        if (archive.packageName != context.packageName) return false
-        val theirs = archive.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
-            ?: return false
-        val ours = runCatching {
-            manager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-                .signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
-        }.getOrNull() ?: return false
-        return ours.contentEquals(theirs)
-    }
-
-    fun canInstall(context: Context): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
-
-    /** Opens the one-time "install unknown apps" switch for this app. */
-    fun openInstallPermission(context: Context) {
-        val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
-            .setData(Uri.parse("package:${context.packageName}"))
+    /** Opens the release page so the browser, not the app, downloads and installs the APK. */
+    fun open(context: Context, release: Release) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(release.pageUrl))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }
-    }
-
-    /**
-     * Hands the APK to Android. The installer replaces the running app in place because the
-     * package name and signature match and the version is higher, so settings and downloads stay.
-     */
-    fun install(context: Context, file: File): Boolean {
-        if (!canInstall(context)) {
-            openInstallPermission(context)
-            return false
-        }
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching { context.startActivity(intent) }.isSuccess
     }
 }
