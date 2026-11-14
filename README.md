@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.6.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.6-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.7.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.7-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-11_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11 and newer" />
 
@@ -15,18 +15,18 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.3.6.apk`, about 1.7 MB.
+The installable file is `AnyVideo-1.3.7.apk`, about 1.7 MB.
 
-- Direct download: [AnyVideo-1.3.6.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.6.apk)
+- Direct download: [AnyVideo-1.3.7.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.7.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.3.6.apk](AnyVideo-1.3.6.apk)
+- Copy in the repository: [AnyVideo-1.3.7.apk](AnyVideo-1.3.7.apk)
 
 Android 11 or newer is the supported baseline. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
 install from your browser or file manager, and Play Protect may ask you to confirm because the
 app does not come from the Play Store.
 
-After the first install, Settings, Updates, Check for updates opens the GitHub release page. The
+After the first install, Settings, Updates, Check for updates opens the APK download directly. The
 browser downloads the new APK and Android installs it; the app itself does not request permission
 to install packages.
 
@@ -117,8 +117,8 @@ the volume low and use an account you can afford to lose.
 
 - **Appearance**: Auto follows the phone, or pin Light or Dark. The choice applies to every screen.
 - **Updates**: checks this project's GitHub releases and shows the notes and APK size. The button
-  opens the release page in your browser, which downloads the APK for Android's normal installer.
-  Keeping install permission out of the app avoids Play Protect's self-updater warning.
+  opens the APK download in your browser, which hands it to Android's normal installer. Keeping
+  install permission out of the app avoids Play Protect's self-updater warning.
 
 - **Resolver**: base URL and key for a cobalt compatible instance. **Test** calls `GET /` and
   reports the version and the number of services. No instance ships with this source, so set one

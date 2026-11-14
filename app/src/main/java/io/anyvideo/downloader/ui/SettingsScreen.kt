@@ -372,9 +372,9 @@ fun SettingsScreen(
             SurfaceCard {
                 Text("Updates", fontWeight = FontWeight.SemiBold)
                 Text(
-                    "AnyVideo ${BuildConfig.VERSION_NAME}. Updates come from this project's GitHub " +
-                        "releases. The app opens the release page; your browser downloads the APK and " +
-                        "Android installs it, so the app never asks for permission to install packages.",
+                                            "AnyVideo ${BuildConfig.VERSION_NAME}. Updates come from this project's GitHub " +
+                            "releases. The app opens the APK download; your browser saves it and Android " +
+                            "installs it, so the app never asks for permission to install packages.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -386,7 +386,7 @@ fun SettingsScreen(
                         is Updates.State.Checking -> "Checking GitHub…"
                         is Updates.State.UpToDate -> "You are on the newest version."
                         is Updates.State.Available ->
-                            "Version ${update.release.name} is available on the release page."
+                            "Version ${update.release.name} is available to download."
                         is Updates.State.Failed -> update.message
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -416,7 +416,7 @@ fun SettingsScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                         Button(onClick = { Updates.open(context, update.release) }) {
-                            Text("Open release page")
+                            Text("Download update")
                         }
                     }
                     else -> {

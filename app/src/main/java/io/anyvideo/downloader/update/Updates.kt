@@ -17,14 +17,21 @@ import java.util.concurrent.TimeUnit
 /**
  * The app is not on Play, so it checks its own GitHub releases. It deliberately does not download
  * or install APKs: that needs REQUEST_INSTALL_PACKAGES and makes Play Protect treat the app as a
- * self-updater. The release page opens in the browser instead, and Android or the browser handles
+ * self-updater. The APK asset opens in the browser instead, and Android or the browser handles
  * the download and the normal installer prompt.
  */
 object Updates {
 
     private const val API = "https://api.github.com/repos/developer-mohanaditya/any-video/releases/latest"
 
-    data class Release(val name: String, val notes: String, val pageUrl: String, val size: Long)
+    data class Release(
+        val name: String,
+        val notes: String,
+        val pageUrl: String,
+        val downloadUrl: String,
+        val apkName: String,
+        val size: Long,
+    )
 
     sealed interface State {
         data object Idle : State
@@ -74,27 +81,7 @@ object Updates {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) error("GitHub answered ${response.code}")
                 val body = response.body?.string() ?: error("GitHub sent an empty answer")
-                val root = JSONObject(body)
-                val tag = root.optString("tag_name")
-                if (tag.isBlank()) error("The release has no version tag")
-                if (!isNewer(tag, BuildConfig.VERSION_NAME)) return@runCatching null
-                val assets = root.optJSONArray("assets") ?: error("The release has no files")
-                var apkSize = 0L
-                for (index in 0 until assets.length()) {
-                    val asset = assets.getJSONObject(index)
-                    if (asset.optString("name").endsWith(".apk", true)) {
-                        apkSize = asset.optLong("size")
-                        break
-                    }
-                }
-                Release(
-                    name = tag.removePrefix("v"),
-                    notes = root.optString("body").trim(),
-                    pageUrl = root.optString("html_url").ifBlank {
-                        "https://github.com/developer-mohanaditya/any-video/releases/tag/$tag"
-                    },
-                    size = apkSize,
-                )
+                parseLatest(JSONObject(body), BuildConfig.VERSION_NAME)
             }
         }
         _state.value = result.fold(
@@ -103,9 +90,46 @@ object Updates {
         )
     }
 
-    /** Opens the release page so the browser, not the app, downloads and installs the APK. */
+    /** Parses the latest-release payload without touching the network. */
+    internal fun parseLatest(root: JSONObject, localVersion: String): Release? {
+        val tag = root.optString("tag_name")
+        if (tag.isBlank()) error("The release has no version tag")
+        if (!isNewer(tag, localVersion)) return null
+        val assets = root.optJSONArray("assets") ?: error("The release has no files")
+        var apkSize = 0L
+        var apkName = ""
+        var apkUrl = ""
+        for (index in 0 until assets.length()) {
+            val asset = assets.getJSONObject(index)
+            val name = asset.optString("name")
+            if (name.endsWith(".apk", true)) {
+                apkSize = asset.optLong("size")
+                apkName = name
+                apkUrl = asset.optString("browser_download_url")
+                break
+            }
+        }
+        val pageUrl = root.optString("html_url").ifBlank {
+            "https://github.com/developer-mohanaditya/any-video/releases/tag/$tag"
+        }
+        return Release(
+            name = tag.removePrefix("v"),
+            notes = root.optString("body").trim(),
+            pageUrl = pageUrl,
+            // GitHub's release page can be handled by the GitHub app or land on the repository
+            // root. The asset URL starts the APK download in the browser.
+            downloadUrl = apkUrl.ifBlank { pageUrl },
+            apkName = apkName,
+            size = apkSize,
+        )
+    }
+
+    /**
+     * Opens the APK asset so the browser, not the app, downloads it. The fallback is the release
+     * page when a release has no APK attachment.
+     */
     fun open(context: Context, release: Release) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(release.pageUrl))
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(release.downloadUrl))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }
     }
