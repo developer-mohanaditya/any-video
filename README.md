@@ -6,22 +6,22 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.5.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.5-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.6.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.6-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
-<img src="https://img.shields.io/badge/Android-8.0_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 8.0 and newer" />
+<img src="https://img.shields.io/badge/Android-11_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11 and newer" />
 
 </div>
 
 ## Download
 
-The installable file is `AnyVideo-1.3.5.apk`, about 1.7 MB.
+The installable file is `AnyVideo-1.3.6.apk`, about 1.7 MB.
 
-- Direct download: [AnyVideo-1.3.5.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.5.apk)
+- Direct download: [AnyVideo-1.3.6.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.6.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.3.5.apk](AnyVideo-1.3.5.apk)
+- Copy in the repository: [AnyVideo-1.3.6.apk](AnyVideo-1.3.6.apk)
 
-Android 8.0 or newer. The APK is signed with the project release key, so later versions install
+Android 11 or newer is the supported baseline. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
 install from your browser or file manager, and Play Protect may ask you to confirm because the
 app does not come from the Play Store.
@@ -35,7 +35,7 @@ to install packages.
 Paste a link, or share one into AnyVideo, and the app finds the media, downloads it itself with a
 live progress bar, and files it in your gallery with the creator's username, or the YouTube video
 title, in the file name. There is no account to create, no advertising SDK and no analytics. Instagram posts and YouTube
-videos up to 1080p can also be resolved on the device itself. TikTok, X and Pinterest go through
+videos up to 4K can also be resolved on the device itself. TikTok, X and Pinterest go through
 a cobalt compatible resolver.
 
 ## What you can do with it

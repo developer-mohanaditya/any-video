@@ -169,6 +169,11 @@ object Downloader {
         _tasks.value = _tasks.value.filter { it.state == State.QUEUED || it.state == State.RUNNING }
     }
 
+    /** Failed rows are session feedback, not gallery history. Drop them when the app leaves. */
+    fun clearFailed() {
+        _tasks.value = _tasks.value.filter { it.state != State.FAILED }
+    }
+
     fun finishedCount(): Int = _tasks.value.count { it.state == State.DONE }
 
     private fun launch(
@@ -363,8 +368,9 @@ object Downloader {
     }
 
     /**
-     * YouTube's direct path hands out separate H.264 and AAC files. Download both, merge them
-     * into one MP4, and only then let the normal publisher put it in the gallery.
+     * YouTube's direct path hands out separate video and AAC files. Download both, merge them
+     * into one MP4, and only then let the normal publisher put it in the gallery. The video side
+     * can be H.264 MP4, VP9 WebM, or AV1 MP4, so its temporary extension follows the URL.
      */
     private suspend fun downloadMerged(
         context: Context,
@@ -375,9 +381,10 @@ object Downloader {
     ): Long = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "downloads").apply { mkdirs() }
         val stamp = System.nanoTime()
-        val videoFile = File(dir, "video-$stamp.mp4")
-        val audioFile = File(dir, "audio-$stamp.m4a")
-        val merged = File(dir, "merged-$stamp.mp4")
+        val webm = task.fileName.endsWith(".webm", ignoreCase = true)
+        val videoFile = File(dir, "video-$stamp.${if (webm) "webm" else "mp4"}")
+        val audioFile = File(dir, "audio-$stamp.${if (webm) "webm" else "m4a"}")
+        val merged = File(dir, "merged-$stamp.${if (webm) "webm" else "mp4"}")
         var videoTotal = 0L
         var videoDone = 0L
         var audioTotal = 0L
@@ -512,7 +519,13 @@ object Downloader {
                 ?: throw IllegalStateException("The audio stream has no audio track")
             val videoFormat = videoExtractor.getTrackFormat(videoTrack)
             val audioFormat = audioExtractor.getTrackFormat(audioTrack)
-            val target = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val webm = video.name.endsWith(".webm", ignoreCase = true) ||
+                out.name.endsWith(".webm", ignoreCase = true)
+            val target = MediaMuxer(
+                out.absolutePath,
+                if (webm) MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
+                else MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+            )
             muxer = target
             val videoOut = target.addTrack(videoFormat)
             val audioOut = target.addTrack(audioFormat)

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -94,6 +95,7 @@ fun DownloadsScreen() {
     var previewItems by remember { mutableStateOf<List<SavedMedia>>(emptyList()) }
     var previewStart by remember { mutableIntStateOf(0) }
     var previewOpen by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<Set<SavedMedia>>(emptySet()) }
 
     val tasks by Downloader.tasks.collectAsState()
     val active = tasks.filter { it.state == Downloader.State.QUEUED || it.state == Downloader.State.RUNNING }
@@ -110,11 +112,7 @@ fun DownloadsScreen() {
                 SelectionBar(
                     count = selection.size,
                     onShare = { shareSelection(context, selection) },
-                    onDelete = {
-                        deleteSelection(context, selection)
-                        selection = emptySet()
-                        refreshKey++
-                    },
+                    onDelete = { pendingDelete = selection },
                     onClose = { selection = emptySet() },
                 )
             } else {
@@ -198,10 +196,32 @@ fun DownloadsScreen() {
                 share(context, media)
                 previewOpen = false
             },
-            onDelete = { media ->
-                Library.delete(context, media)
-                previewOpen = false
-                refreshKey++
+            onDelete = { media -> pendingDelete = setOf(media) },
+        )
+    }
+
+    if (pendingDelete.isNotEmpty()) {
+        val count = pendingDelete.size
+        AlertDialog(
+            onDismissRequest = { pendingDelete = emptySet() },
+            title = { Text(if (count == 1) "Delete this file?" else "Delete $count files?") },
+            text = {
+                Text(
+                    "This permanently removes the selected file(s) from your gallery. " +
+                        "This cannot be undone.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteSelection(context, pendingDelete)
+                    selection = emptySet()
+                    pendingDelete = emptySet()
+                    previewOpen = false
+                    refreshKey++
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = emptySet() }) { Text("Cancel") }
             },
         )
     }
@@ -284,21 +304,31 @@ private fun MediaPage(
         return
     }
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        items(items, key = { it.uri.toString() }) { media ->
-            val chosen = media in selection
-            MediaTile(
-                media = media,
-                chosen = chosen,
-                onClick = { if (selection.isEmpty()) onOpen(items, media) else onToggle(media) },
-                onLongClick = { onToggle(media) },
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (selection.isNotEmpty()) {
+            Text(
+                if (selection.size == 1) "1 item selected" else "${selection.size} items selected",
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
             )
+        }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentPadding = PaddingValues(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(items, key = { it.uri.toString() }) { media ->
+                val chosen = media in selection
+                MediaTile(
+                    media = media,
+                    chosen = chosen,
+                    onClick = { if (selection.isEmpty()) onOpen(items, media) else onToggle(media) },
+                    onLongClick = { onToggle(media) },
+                )
+            }
         }
     }
 }

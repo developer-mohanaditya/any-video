@@ -120,8 +120,9 @@ object Resolver {
             }
         }
 
-        // YouTube's visionOS player returns full H.264/AAC streams even for videos the resolver
-        // cannot fetch. Video only, up to 1080p; audio and 4K stay on the resolver.
+        // YouTube's visionOS player returns full video/AAC streams even for videos the resolver
+        // cannot fetch. H.264 covers 1080p; 4K uses VP9 (AV1 for 2160p on API 34+), then the two
+        // tracks are muxed locally. Audio-only requests still use the resolver.
         if (YouTubeFormats.videoId(url) != null &&
             !(choice?.audioOnly ?: Prefs.youtubeAudioOnly)
         ) {

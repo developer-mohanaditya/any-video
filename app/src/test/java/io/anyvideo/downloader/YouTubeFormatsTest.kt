@@ -8,14 +8,14 @@ import org.junit.Test
 class YouTubeFormatsTest {
 
     @Test
-    fun `quality above 8k is capped before the resolver`() {
-        assertEquals("4320", YouTubeFormats.cappedQuality("8000"))
-        assertEquals("4320", YouTubeFormats.cappedQuality("4321"))
+    fun `quality above 4k is capped before the resolver`() {
+        assertEquals("2160", YouTubeFormats.cappedQuality("8000"))
+        assertEquals("2160", YouTubeFormats.cappedQuality("4321"))
     }
 
     @Test
-    fun `8k and lower qualities are kept`() {
-        assertEquals("4320", YouTubeFormats.cappedQuality("4320"))
+    fun `4k and lower qualities are kept`() {
+        assertEquals("2160", YouTubeFormats.cappedQuality("4320"))
         assertEquals("2160", YouTubeFormats.cappedQuality("2160"))
         assertEquals("max", YouTubeFormats.cappedQuality("max"))
     }
@@ -59,18 +59,18 @@ class YouTubeFormatsTest {
     }
 
     @Test
-    fun `parser caps 16k at 8k and reads the highest audio-only bitrate`() {
+    fun `parser caps 16k at 4k and reads the highest audio-only bitrate`() {
         val body = """
             {
               "playabilityStatus": {"status": "OK"},
               "streamingData": {
                 "formats": [
-                  {"height": 360, "mimeType": "video/mp4", "bitrate": 700000}
+                  {"height": 360, "mimeType": "video/mp4", "bitrate": 700000, "url": "https://video-360"}
                 ],
                 "adaptiveFormats": [
-                  {"height": 8640, "mimeType": "video/webm"},
-                  {"height": 4320, "mimeType": "video/webm"},
-                  {"height": 2160, "mimeType": "video/mp4"},
+                  {"height": 8640, "mimeType": "video/webm", "url": "https://video-8640"},
+                  {"height": 4320, "mimeType": "video/webm", "url": "https://video-4320"},
+                  {"height": 2160, "mimeType": "video/mp4", "url": "https://video-2160"},
                   {"mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 148999},
                   {"mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130000}
                 ]
@@ -79,7 +79,7 @@ class YouTubeFormatsTest {
         """.trimIndent()
 
         assertEquals(
-            YouTubeFormats.Availability(listOf(4320, 2160, 360), 148),
+            YouTubeFormats.Availability(listOf(2160, 360), 148),
             YouTubeFormats.parseAvailability(body),
         )
     }
@@ -90,14 +90,37 @@ class YouTubeFormatsTest {
             {
               "playabilityStatus": {"status": "OK"},
               "streamingData": {
-                "formats": [{"height": 720, "mimeType": "video/mp4"}],
-                "adaptiveFormats": [{"height": 1080, "mimeType": "video/mp4"}]
+                "formats": [{"height": 720, "mimeType": "video/mp4", "url": "https://video-720"}],
+                "adaptiveFormats": [{"height": 1080, "mimeType": "video/mp4", "url": "https://video-1080"}]
               }
             }
         """.trimIndent()
 
         assertEquals(
             YouTubeFormats.Availability(listOf(1080, 720), null),
+            YouTubeFormats.parseAvailability(body),
+        )
+    }
+
+    @Test
+    fun `availability ignores heights that have no downloadable url`() {
+        val body = """
+            {
+              "playabilityStatus": {"status": "OK"},
+              "streamingData": {
+                "adaptiveFormats": [
+                  {"height": 2160, "mimeType": "video/mp4"},
+                  {"height": 1440, "mimeType": "video/mp4", "url": ""},
+                  {"height": 1080, "mimeType": "video/mp4", "url": "https://video-1080"},
+                  {"height": 720, "mimeType": "video/mp4", "url": "https://video-720"},
+                  {"mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 128000, "url": "https://audio"}
+                ]
+              }
+            }
+        """.trimIndent()
+
+        assertEquals(
+            YouTubeFormats.Availability(listOf(1080, 720), 128),
             YouTubeFormats.parseAvailability(body),
         )
     }
@@ -140,6 +163,59 @@ class YouTubeFormatsTest {
           }
         }
     """.trimIndent()
+
+    private val direct4kBody = """
+        {
+          "playabilityStatus": {"status": "OK"},
+          "videoDetails": {"title": "4K test"},
+          "streamingData": {
+            "adaptiveFormats": [
+              {"height": 2160, "mimeType": "video/webm; codecs=\"vp9\"", "url": "https://video-2160-vp9"},
+              {"height": 2160, "mimeType": "video/mp4; codecs=\"av01.0.13M.10\"", "url": "https://video-2160-av1"},
+              {"height": 1440, "mimeType": "video/webm; codecs=\"vp9\"", "url": "https://video-1440-vp9"},
+              {"height": 1080, "mimeType": "video/mp4; codecs=\"avc1.640028\"", "url": "https://video-1080"},
+              {"mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "audioTrack": {"audioIsDefault": true}, "url": "https://audio"},
+              {"mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 128000, "url": "https://audio-opus"}
+            ]
+          }
+        }
+    """.trimIndent()
+
+    @Test
+    fun `direct path picks real 4k vp9 when 2160 is requested`() {
+        val candidate = YouTubeFormats.parseDirect(
+            direct4kBody,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "2160",
+            allowAv1 = false,
+        )!!
+
+        assertEquals("https://video-2160-vp9", candidate.url)
+        assertEquals("https://audio-opus", candidate.audioUrl)
+        assertEquals("4K test [dQw4w9WgXcQ] (2160p).webm", candidate.fileName)
+        assertEquals(
+            "https://video-2160-av1",
+            YouTubeFormats.parseDirect(
+                direct4kBody,
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "2160",
+                allowAv1 = true,
+            )?.url,
+        )
+    }
+
+    @Test
+    fun `a stale 8k choice is capped to 4k`() {
+        val candidate = YouTubeFormats.parseDirect(
+            direct4kBody,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "4320",
+            allowAv1 = true,
+        )!!
+
+        assertEquals("https://video-2160-av1", candidate.url)
+        assertEquals("4K test [dQw4w9WgXcQ] (2160p).mp4", candidate.fileName)
+    }
 
     @Test
     fun `direct path picks the requested video and the original audio track`() {

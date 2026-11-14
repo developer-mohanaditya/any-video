@@ -2,6 +2,7 @@ package io.anyvideo.downloader.ui
 
 import android.app.Activity
 import android.content.ClipboardManager
+import android.os.Build
 import android.content.Context
 import android.widget.Toast
 import androidx.annotation.DrawableRes
@@ -69,6 +70,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -133,8 +136,14 @@ fun HomeScreen(
     var results by remember { mutableStateOf<List<MediaCandidate>>(emptyList()) }
     var message by remember { mutableStateOf<String?>(null) }
     val failedTask = downloadTasks.lastOrNull { it.state == Downloader.State.FAILED }
-    LaunchedEffect(failedTask?.id, failedTask?.error) {
-        failedTask?.let { message = "${it.fileName}: ${it.error}".take(140) }
+    // Failure text is derived from the task list, so clearing failed rows also clears the message
+    // under the field. A failure takes priority over the earlier "Saving …" progress message.
+    val visibleMessage = failedTask?.let { "${it.fileName}: ${it.error}".take(140) } ?: message
+    // A failed attempt is feedback for this visit, not a notification that follows the user back
+    // into the app from Recents.
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        message = null
+        Downloader.clearFailed()
     }
     /** True when the current card was already queued by the paste, so it needs no button. */
     var autoSaved by remember { mutableStateOf(false) }
@@ -187,6 +196,7 @@ fun HomeScreen(
         }
         if (activity == null) return
         hideKeyboard()
+        Downloader.clearFailed()
         loading = true
         message = null
         waitingForGallery = false
@@ -288,7 +298,8 @@ fun HomeScreen(
 
     pendingYouTube?.let { target ->
         YouTubePickerDialog(
-            availableHeights = youtubeAvailability?.heights.orEmpty(),
+            availableHeights = youtubeAvailability?.heights.orEmpty()
+                .filter { it <= maxDirectHeight() },
             audioKbps = youtubeAvailability?.audioKbps,
             probed = youtubeAvailability != null,
             checking = checkingYouTube,
@@ -434,12 +445,12 @@ fun HomeScreen(
         )
 
         AnimatedVisibility(
-            visible = message != null,
+            visible = visibleMessage != null,
             enter = fadeIn() + expandVertically(),
             exit = fadeOut() + shrinkVertically(),
         ) {
             Text(
-                message.orEmpty(),
+                visibleMessage.orEmpty(),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -873,9 +884,13 @@ private fun RecentProfileBubble(profile: RecentProfile, onClick: () -> Unit) {
     }
 }
 
-/** "Best" lets the resolver choose the highest stream the video actually has. */
+/** "Best" keeps the compatible H.264 stream; explicit chips expose real 1440/2160. */
 private fun qualityOptions(heights: List<Int>): List<Pair<String, String>> =
-    listOf("max" to "Best") + heights.map { it.toString() to "${it}p" }
+    listOf("max" to "Best") +
+        heights.filter { it <= maxDirectHeight() }.map { it.toString() to "${it}p" }
+
+/** 4K VP9/Opus needs API 29; the supported Android 11+ baseline covers it. */
+private fun maxDirectHeight(): Int = if (Build.VERSION.SDK_INT >= 29) 2160 else 1080
 
 /** cobalt's audioFormat values; "best" gives the original muxed audio stream. */
 private val AUDIO_FORMATS = listOf(

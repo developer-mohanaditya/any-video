@@ -9,15 +9,16 @@ import org.json.JSONObject
 /**
  * Reads the qualities a YouTube video really has before the format sheet is shown.
  *
- * The Android player endpoint returns one entry per available stream. We only need the video
- * heights and the best source audio bitrate: the download still goes through the configured
- * resolver, so this probe makes no download URL and keeps no media. Asking for a video height
- * that is not in this reply is what made a 4K choice fail on a 720p video.
+ * The Android player endpoint returns one entry per available stream. The probe only needs the
+ * video heights and the best source audio bitrate, so it keeps no media. Downloads use the
+ * visionOS direct path where possible; the resolver remains the fallback for audio-only and
+ * anything the direct clients cannot serve. Asking for a video height that is not in this reply
+ * is what made a 4K choice fail on a 720p video.
  */
 object YouTubeFormats {
 
-    /** YouTube's 8K height. Nothing above this is offered to the resolver. */
-    const val MAX_HEIGHT = 4320
+    /** YouTube's 4K height. Nothing above this is offered to the resolver. */
+    const val MAX_HEIGHT = 2160
 
     /** What the pending link can actually deliver. Empty heights mean the reply had no video. */
     data class Availability(
@@ -47,16 +48,22 @@ object YouTubeFormats {
     }
 
     /**
-     * A H.264 video plus an AAC audio track from YouTube's visionOS player. The Android player
-     * hands out adaptive URLs that answer 403 without a proof-of-origin token; the visionOS
-     * client returns full length URLs that download normally. The caller merges the two tracks.
+     * A video plus an AAC audio track from YouTube's visionOS player. The Android player hands
+     * out adaptive URLs that answer 403 without a proof-of-origin token; the visionOS client
+     * returns full length URLs that download normally. H.264 is used through 1080p, VP9 for
+     * 1440p/2160p, and AV1 for 2160p on Android versions whose MediaMuxer supports it. The caller
+     * merges the two tracks.
      */
     suspend fun direct(pageUrl: String, quality: String): MediaCandidate? =
         withContext(Dispatchers.IO) {
-            val requested = quality.trim().toIntOrNull()
-            if (requested != null && requested > 1080) return@withContext null
             val body = visionosPlayer(pageUrl) ?: return@withContext null
-            parseDirect(body, pageUrl, quality)
+            parseDirect(
+                body = body,
+                pageUrl = pageUrl,
+                quality = quality,
+                allowAv1 = android.os.Build.VERSION.SDK_INT >= 34,
+                allowVp9 = android.os.Build.VERSION.SDK_INT >= 29,
+            )
         }
 
     /** The original AAC track as M4A, for when the resolver cannot produce an audio file. */
@@ -173,10 +180,17 @@ object YouTubeFormats {
         val streaming = root.optJSONObject("streamingData")
             ?: return Availability(emptyList(), null)
         val formats = formats(streaming)
-        val heights = formats.asSequence()
+        // A player reply can list a height without a playable URL, especially for formats the
+        // client is not allowed to download. Those are not choices this app can offer, and
+        // showing them made a 1080p video look like it had 2K and 4K streams.
+        val downloadableVideos = formats.filter {
+            it.optString("mimeType").startsWith("video/") &&
+                it.optString("url").isNotBlank()
+        }
+        val heights = downloadableVideos.asSequence()
             .map { it.optInt("height", 0) }
             // Audio-only entries have height 0. 144 is the smallest video format YouTube
-            // publishes. Anything above 4320 is capped to 8K rather than dropped.
+            // publishes. Anything above 2160 is capped to 4K rather than dropped.
             .filter { it >= 144 }
             .map { it.coerceAtMost(MAX_HEIGHT) }
             .toSortedSet()
@@ -193,38 +207,73 @@ object YouTubeFormats {
         return Availability(heights, audioKbps)
     }
 
-    /** Picks an H.264 video and the default AAC track from one visionOS player reply. */
-    internal fun parseDirect(body: String?, pageUrl: String, quality: String): MediaCandidate? {
+    /** Picks a video and the default AAC track from one visionOS player reply. */
+    internal fun parseDirect(
+        body: String?,
+        pageUrl: String,
+        quality: String,
+        allowAv1: Boolean = false,
+        allowVp9: Boolean = true,
+    ): MediaCandidate? {
         if (body.isNullOrBlank()) return null
         val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
         if (root.optJSONObject("playabilityStatus")?.optString("status") != "OK") return null
         val streaming = root.optJSONObject("streamingData") ?: return null
         val id = videoId(pageUrl) ?: return null
-        val target = (quality.trim().toIntOrNull() ?: 1080).coerceIn(144, 1080)
+        val requested = quality.trim().toIntOrNull()
+        // "Best" keeps the broadly compatible H.264 stream. An explicit height picks the codec
+        // YouTube actually uses at that height: H.264 through 1080, VP9 at 1440/2160, and AV1
+        // at 2160 where the platform can mux it.
+        val target = (requested ?: 1080).coerceIn(144, MAX_HEIGHT)
         val videos = objects(streaming.optJSONArray("adaptiveFormats"))
-            .filter {
+        val video = if (target <= 1080) {
+            val h264 = videos.filter {
                 val mime = it.optString("mimeType")
                 mime.startsWith("video/mp4") &&
                     mime.contains("avc1") &&
                     it.optInt("height", 0) >= 144 &&
                     it.optString("url").isNotBlank()
             }
-        // With no stream at or below the target there is nothing this path can serve: the
-        // resolver must handle the higher-quality file instead of silently saving a larger one
-        // when the caller asked for a 1080p cap.
-        val video = videos.filter { it.optInt("height", 0) <= target }
-            .maxByOrNull { it.optInt("height", 0) }
-            ?: return null
+            h264.filter { it.optInt("height", 0) <= target }
+                .maxByOrNull { it.optInt("height", 0) }
+        } else {
+            // AV1 is the best fit for Android 14+: the stream is already in MP4 and carries
+            // the codec configuration the muxer needs. VP9 is the fallback for older releases.
+            val av1 = if (allowAv1) {
+                videos.filter {
+                    val mime = it.optString("mimeType")
+                    mime.startsWith("video/mp4") &&
+                        mime.contains("av01") &&
+                        it.optInt("height", 0) == target &&
+                        it.optString("url").isNotBlank()
+                }.maxByOrNull { it.optLong("bitrate", 0L) }
+            } else {
+                null
+            }
+            val vp9 = if (allowVp9) {
+                videos.filter {
+                    it.optString("mimeType").startsWith("video/webm") &&
+                        it.optString("mimeType").contains("vp9") &&
+                        it.optInt("height", 0) == target &&
+                        it.optString("url").isNotBlank()
+                }.minByOrNull { if (it.optString("mimeType").contains("vp9.2")) 1 else 0 }
+            } else {
+                null
+            }
+            av1 ?: vp9
+        } ?: return null
         // A 720 choice must not quietly become a 360 file. Let the resolver try instead.
-        val requested = quality.trim().toIntOrNull()
-        if (requested != null && video.optInt("height", 0) < requested) return null
-        val audio = defaultAudio(streaming) ?: return null
+        if (video.optInt("height", 0) < target) return null
+        // VP9 WebM uses Opus, while H.264/AV1 MP4 uses AAC. Muxing VP9 into MP4 is rejected by
+        // Android's writer, so the container follows the codec.
+        val webm = video.optString("mimeType").startsWith("video/webm")
+        val audio = defaultAudio(streaming, opus = webm) ?: return null
         val title = root.optJSONObject("videoDetails")?.optString("title").orEmpty()
         val height = video.optInt("height", 0)
         return MediaCandidate(
             url = video.optString("url"),
             audioUrl = audio.optString("url"),
-            fileName = directName(title, id, height),
+            fileName = directName(title, id, height, if (webm) "webm" else "mp4"),
             thumbnailUrl = "https://i.ytimg.com/vi/$id/hqdefault.jpg",
             isVideo = true,
             sourceUrl = pageUrl,
@@ -250,11 +299,13 @@ object YouTubeFormats {
         )
     }
 
-    private fun defaultAudio(streaming: JSONObject): JSONObject? {
+    private fun defaultAudio(streaming: JSONObject, opus: Boolean = false): JSONObject? {
         val audios = objects(streaming.optJSONArray("adaptiveFormats"))
             .filter {
-                it.optString("mimeType").startsWith("audio/mp4") &&
-                    it.optString("mimeType").contains("mp4a") &&
+                val mime = it.optString("mimeType")
+                val container = if (opus) "audio/webm" else "audio/mp4"
+                val codec = if (opus) "opus" else "mp4a"
+                mime.startsWith(container) && mime.contains(codec) &&
                     it.optString("url").isNotBlank()
             }
         return audios.filter {
@@ -271,8 +322,8 @@ object YouTubeFormats {
         ?.replace("\\/", "/")
         ?.takeIf { it.isNotBlank() }
 
-    private fun directName(title: String, id: String, height: Int): String =
-        "${clampBytes(cleanedTitle(title), 160)} [$id] (${height}p).mp4"
+    private fun directName(title: String, id: String, height: Int, extension: String): String =
+        "${clampBytes(cleanedTitle(title), 160)} [$id] (${height}p).$extension"
 
     private fun audioName(title: String, id: String): String =
         "${clampBytes(cleanedTitle(title), 160)} [$id].m4a"

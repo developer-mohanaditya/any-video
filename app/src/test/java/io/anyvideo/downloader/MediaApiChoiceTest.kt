@@ -22,7 +22,7 @@ class MediaApiChoiceTest {
     }
 
     @Test
-    fun `per-request video quality is capped at 8k`() {
+    fun `per-request video quality is capped at 4k`() {
         val choice = YouTubeChoice(
             audioOnly = false,
             quality = "8000",
@@ -30,6 +30,6 @@ class MediaApiChoiceTest {
             audioBitrate = "320",
         )
 
-        assertEquals("auto/4320", MediaApi.variant(videoUrl, choice))
+        assertEquals("auto/2160", MediaApi.variant(videoUrl, choice))
     }
 }

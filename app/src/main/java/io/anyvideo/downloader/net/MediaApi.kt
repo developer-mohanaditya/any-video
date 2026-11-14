@@ -73,7 +73,7 @@ object MediaApi {
         val payload = JSONObject()
             .put("url", pageUrl)
             // Ask for the best file the instance can serve; the picker path then hands us
-            // every carousel child instead of a single merged file. Nothing above 8K is sent.
+            // every carousel child instead of a single merged file. Nothing above 4K is sent.
             .put("videoQuality", if (options.audioOnly) "max" else options.quality)
             .put("downloadMode", if (options.audioOnly) "audio" else "auto")
             .put("filenameStyle", "basic")

@@ -11,6 +11,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
@@ -46,15 +49,18 @@ import io.anyvideo.downloader.ui.HomeScreen
 import io.anyvideo.downloader.ui.LineBreakScreen
 import io.anyvideo.downloader.ui.RepostScreen
 import io.anyvideo.downloader.ui.SettingsScreen
+import io.anyvideo.downloader.ui.SplashScreen
 import io.anyvideo.downloader.ui.ToolsScreen
 import io.anyvideo.downloader.ui.WhatsAppScreen
 import io.anyvideo.downloader.net.IgSession
+import io.anyvideo.downloader.download.Downloader
 import io.anyvideo.downloader.ui.AnyVideoTheme
 import io.anyvideo.downloader.util.Prefs
 import io.anyvideo.downloader.ui.tools.DpMakerScreen
 import io.anyvideo.downloader.ui.tools.GridMakerScreen
 import io.anyvideo.downloader.ui.tools.ResizeScreen
 import io.anyvideo.downloader.ui.tools.SquarePhotoScreen
+import kotlinx.coroutines.delay
 
 enum class Screen {
     HOME, DOWNLOADS, BROWSE, TOOLS,
@@ -64,16 +70,36 @@ enum class Screen {
 class MainActivity : ComponentActivity() {
 
     private var incomingUrl by mutableStateOf<String?>(null)
+    private var showSplash by mutableStateOf(false)
+    private var windowReady by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Only the first activity in this process gets the launch screen. Returning from
+        // Recents reuses the activity, and a rotation must not replay it.
+        showSplash = (application as App).consumeColdStart()
         handleIntent(intent)
         setContent {
             AppRoot(
                 incomingUrl = incomingUrl,
                 onIncomingConsumed = { incomingUrl = null },
+                showSplash = showSplash,
+                windowReady = windowReady,
+                onSplashFinished = { showSplash = false },
             )
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) Downloader.clearFailed()
+    }
+
+    override fun onDestroy() {
+        if (isFinishing && !isChangingConfigurations) {
+            (application as App).markColdStart()
+        }
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -101,7 +127,10 @@ class MainActivity : ComponentActivity() {
      */
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) pickUpClipboard()
+        if (hasFocus) {
+            windowReady = true
+            pickUpClipboard()
+        }
     }
 
     private fun pickUpClipboard() {
@@ -146,7 +175,13 @@ private fun requiredPermissions(): Array<String> {
 }
 
 @Composable
-private fun AppRoot(incomingUrl: String?, onIncomingConsumed: () -> Unit) {
+private fun AppRoot(
+    incomingUrl: String?,
+    onIncomingConsumed: () -> Unit,
+    showSplash: Boolean,
+    windowReady: Boolean,
+    onSplashFinished: () -> Unit,
+) {
     var themeMode by remember { mutableStateOf(Prefs.themeMode) }
     val darkTheme = when (themeMode) {
         "dark" -> true
@@ -154,12 +189,26 @@ private fun AppRoot(incomingUrl: String?, onIncomingConsumed: () -> Unit) {
         else -> isSystemInDarkTheme()
     }
     AnyVideoTheme(darkTheme = darkTheme) {
-    AppRootContent(
-        incomingUrl = incomingUrl,
-        onIncomingConsumed = onIncomingConsumed,
-        themeMode = themeMode,
-        onThemeChanged = { themeMode = it },
-    )
+        Box(modifier = Modifier.fillMaxSize()) {
+            AppRootContent(
+                incomingUrl = incomingUrl,
+                onIncomingConsumed = onIncomingConsumed,
+                themeMode = themeMode,
+                onThemeChanged = { themeMode = it },
+            )
+            LaunchedEffect(showSplash, windowReady) {
+                if (showSplash && windowReady) {
+                    delay(1250)
+                    onSplashFinished()
+                }
+            }
+            AnimatedVisibility(
+                visible = showSplash,
+                exit = fadeOut(animationSpec = tween(350)),
+            ) {
+                SplashScreen()
+            }
+        }
     }
 }
 
