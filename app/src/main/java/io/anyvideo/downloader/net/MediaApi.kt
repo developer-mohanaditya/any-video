@@ -354,7 +354,7 @@ object MediaApi {
         val extension = extensionOf(raw) ?: return null
         val base = raw.substringBeforeLast('.').trim()
         if (base.isEmpty()) return null
-        val cleaned = base
+        val cleaned = FileNames.noEmDash(base)
             .replace(Regex("""[\\/:*?"<>|\r\n\t]"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()

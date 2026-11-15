@@ -18,6 +18,7 @@ import io.anyvideo.downloader.net.YouTubeFormats
 import io.anyvideo.downloader.data.MediaCandidate
 import io.anyvideo.downloader.data.MimeTypes
 import io.anyvideo.downloader.util.Prefs
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,7 +50,7 @@ object Downloader {
     const val VIDEO_FOLDER = "Movies/anyvideo"
     const val AUDIO_FOLDER = "Music/anyvideo"
 
-    enum class State { QUEUED, RUNNING, DONE, FAILED }
+    enum class State { QUEUED, RUNNING, PAUSED, DONE, FAILED }
 
     data class Task(
         val id: Long,
@@ -59,6 +60,7 @@ object Downloader {
         val mime: String?,
         val isVideo: Boolean,
         val sourceUrl: String?,
+        val headers: Map<String, String> = emptyMap(),
         val audioUrl: String? = null,
         val chunked: Boolean = false,
         val state: State = State.QUEUED,
@@ -90,10 +92,16 @@ object Downloader {
 
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
+    private var queueBusy = false
+    private val started = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+    private val pauseGates = java.util.concurrent.ConcurrentHashMap<Long, CompletableDeferred<Unit>>()
+    private val cancelled = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
 
-    /** True while at least one transfer is queued or running, used by the foreground service. */
+    /** True while at least one transfer is queued, running or paused, used by the service. */
     val busy: Boolean
-        get() = _tasks.value.any { it.state == State.QUEUED || it.state == State.RUNNING }
+        get() = _tasks.value.any {
+            it.state == State.QUEUED || it.state == State.RUNNING || it.state == State.PAUSED
+        }
 
     fun isAudio(fileName: String): Boolean =
         MimeTypes.of(fileName)?.startsWith("audio/") == true
@@ -135,12 +143,17 @@ object Downloader {
             mime = MimeTypes.of(candidate.fileName),
             isVideo = candidate.isVideo,
             sourceUrl = candidate.sourceUrl,
+            headers = candidate.headers,
             audioUrl = candidate.audioUrl,
             chunked = candidate.chunked,
         )
         _tasks.value = _tasks.value + task
         candidate.sourceUrl?.let { DownloadRegistry.rememberSource(app, it) }
-        launch(app, task, headers = candidate.headers, viaProxy = false)
+        if (!queueBusy) {
+            started.add(task.id)
+            update(task.id) { it.copy(state = State.RUNNING) }
+            kick(app)
+        }
         DownloadService.start(app)
         return true
     }
@@ -156,22 +169,111 @@ object Downloader {
     fun retry(context: Context, id: Long) {
         val task = _tasks.value.firstOrNull { it.id == id } ?: return
         if (task.state != State.FAILED) return
-        update(task.id) { it.copy(state = State.QUEUED, received = 0, error = null) }
-        launch(context.applicationContext, task.copy(state = State.QUEUED), emptyMap(), false)
+        cancelled.remove(id)
+        pauseGates.remove(id)?.complete(Unit)
+        started.add(id)
+        update(task.id) { it.copy(state = State.RUNNING, received = 0, error = null) }
         DownloadService.start(context.applicationContext)
+        kick(context.applicationContext)
+    }
+
+    /** Suspends the transfer between chunks, keeping its bytes and connection intact. */
+    fun pause(id: Long) {
+        val task = _tasks.value.firstOrNull { it.id == id } ?: return
+        if (task.state != State.RUNNING) return
+        pauseGates[id] = CompletableDeferred()
+        update(id) { it.copy(state = State.PAUSED) }
+    }
+
+    fun resume(context: Context, id: Long) {
+        val task = _tasks.value.firstOrNull { it.id == id } ?: return
+        if (task.state != State.PAUSED) return
+        cancelled.remove(id)
+        pauseGates.remove(id)?.complete(Unit)
+        started.add(id)
+        update(id) { it.copy(state = State.RUNNING) }
+        DownloadService.start(context.applicationContext)
+        kick(context)
+    }
+
+    /** Starts one queued download without touching the active one. */
+    fun start(context: Context, id: Long) {
+        val task = _tasks.value.firstOrNull { it.id == id } ?: return
+        if (task.state != State.QUEUED) return
+        started.add(id)
+        update(id) { it.copy(state = State.RUNNING) }
+        DownloadService.start(context.applicationContext)
+        kick(context)
+    }
+
+    private fun kick(context: Context) {
+        if (queueBusy) return
+        queueBusy = true
+        scope.launch {
+            try {
+                drain(context)
+            } finally {
+                queueBusy = false
+                DownloadService.stopIfIdle(context)
+            }
+        }
+    }
+
+    private suspend fun drain(context: Context) {
+        while (true) {
+            val task = _tasks.value.firstOrNull {
+                it.state == State.RUNNING && started.contains(it.id)
+            } ?: return
+            started.remove(task.id)
+            run(context, task, task.headers, viaProxy = false)
+        }
+    }
+
+    private suspend fun awaitUnpaused(id: Long) {
+        while (true) {
+            if (cancelled.contains(id)) throw IllegalStateException("Cancelled")
+            val gate = pauseGates[id] ?: return
+            gate.await()
+            if (pauseGates[id] !== gate) continue
+            return
+        }
     }
 
     fun cancel(id: Long) {
+        val task = _tasks.value.firstOrNull { it.id == id } ?: return
+        cancelled.add(id)
+        started.remove(id)
+        pauseGates.remove(id)?.complete(Unit)
+        synchronized(inFlight) { inFlight.remove("${task.relativePath}/${task.fileName}") }
         update(id) { it.copy(state = State.FAILED, error = "Cancelled") }
     }
 
     fun clearFinished() {
-        _tasks.value = _tasks.value.filter { it.state == State.QUEUED || it.state == State.RUNNING }
+        val remaining = _tasks.value.filter {
+            it.state == State.QUEUED || it.state == State.RUNNING || it.state == State.PAUSED
+        }
+        _tasks.value = remaining
+        val ids = remaining.map { it.id }.toSet()
+        cancelled.retainAll(ids)
+        started.retainAll(ids)
     }
 
     /** Failed rows are session feedback, not gallery history. Drop them when the app leaves. */
     fun clearFailed() {
         _tasks.value = _tasks.value.filter { it.state != State.FAILED }
+        val ids = _tasks.value.map { it.id }.toSet()
+        cancelled.retainAll(ids)
+        started.retainAll(ids)
+    }
+
+    /** Drops one finished or failed row without touching its gallery file. */
+    fun remove(id: Long) {
+        val task = _tasks.value.firstOrNull { it.id == id } ?: return
+        if (task.state == State.RUNNING || task.state == State.PAUSED) return
+        _tasks.value = _tasks.value.filterNot { it.id == id }
+        cancelled.remove(id)
+        started.remove(id)
+        pauseGates.remove(id)?.complete(Unit)
     }
 
     fun finishedCount(): Int = _tasks.value.count { it.state == State.DONE }
@@ -201,8 +303,12 @@ object Downloader {
         headers: Map<String, String>,
         viaProxy: Boolean,
     ) {
+        // Kept explicit: a queued task carries the headers it was resolved with.
         try {
-            update(task.id) { it.copy(state = State.RUNNING) }
+            if (cancelled.contains(task.id)) throw IllegalStateException("Cancelled")
+            update(task.id) {
+                it.copy(state = if (pauseGates.containsKey(task.id)) State.PAUSED else State.RUNNING)
+            }
             val downloaded = when {
                 !task.audioUrl.isNullOrBlank() -> downloadMerged(
                     context = context,
@@ -212,6 +318,7 @@ object Downloader {
                     onProgress = { received, total ->
                         update(task.id) { it.copy(received = received, total = total) }
                     },
+                    awaitUnpaused = { awaitUnpaused(task.id) },
                 )
                 task.chunked -> downloadChunked(
                     context = context,
@@ -220,6 +327,7 @@ object Downloader {
                     onProgress = { received, total ->
                         update(task.id) { it.copy(received = received, total = total) }
                     },
+                    awaitUnpaused = { awaitUnpaused(task.id) },
                 )
                 else -> downloadTo(
                     url = task.url,
@@ -230,8 +338,10 @@ object Downloader {
                         update(task.id) { it.copy(received = received, total = total) }
                     },
                     publishFile = { file -> publish(context, task, file) },
+                    awaitUnpaused = { awaitUnpaused(task.id) },
                 )
             }
+            if (cancelled.contains(task.id)) throw IllegalStateException("Cancelled")
             // Finish with the bytes that actually reached disk, not a missing content length.
             update(task.id) {
                 it.copy(state = State.DONE, received = downloaded, total = downloaded, error = null)
@@ -239,6 +349,11 @@ object Downloader {
             synchronized(inFlight) { inFlight.remove("${task.relativePath}/${task.fileName}") }
         } catch (t: Throwable) {
             val message = t.message ?: "Download failed"
+            if (cancelled.contains(task.id)) {
+                synchronized(inFlight) { inFlight.remove("${task.relativePath}/${task.fileName}") }
+                update(task.id) { it.copy(state = State.FAILED, error = "Cancelled") }
+                return
+            }
             val proxy = Prefs.fallbackProxy.trim()
             // A failed CDN request gets one retry through the configured proxy, without the
             // session headers, because a proxy is a third party.
@@ -319,6 +434,7 @@ object Downloader {
         fileName: String,
         onProgress: (received: Long, total: Long) -> Unit = { _, _ -> },
         publishFile: (File) -> Unit,
+        awaitUnpaused: suspend () -> Unit = {},
     ): Long = withContext(Dispatchers.IO) {
         val dir = cacheDir.apply { mkdirs() }
         val temp = File(dir, "download-${System.nanoTime()}-$fileName")
@@ -345,6 +461,7 @@ object Downloader {
                         var received = 0L
                         var lastEmit = 0L
                         while (true) {
+                            awaitUnpaused()
                             val read = input.read(buffer)
                             if (read <= 0) break
                             output.write(buffer, 0, read)
@@ -378,6 +495,7 @@ object Downloader {
         headers: Map<String, String>,
         audioUrl: String,
         onProgress: (received: Long, total: Long) -> Unit,
+        awaitUnpaused: suspend () -> Unit = {},
     ): Long = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "downloads").apply { mkdirs() }
         val stamp = System.nanoTime()
@@ -390,12 +508,12 @@ object Downloader {
         var audioTotal = 0L
         var audioDone = 0L
         try {
-            val videoSize = fetchToFile(task.url, headers, videoFile) { received, total ->
+            val videoSize = fetchToFile(task.url, headers, videoFile, awaitUnpaused) { received, total ->
                 videoDone = received
                 videoTotal = total
                 onProgress(videoDone + audioDone, videoTotal + audioTotal)
             }
-            val audioSize = fetchToFile(audioUrl, headers, audioFile) { received, total ->
+            val audioSize = fetchToFile(audioUrl, headers, audioFile, awaitUnpaused) { received, total ->
                 audioDone = received
                 audioTotal = total
                 onProgress(videoDone + audioDone, videoTotal + audioTotal)
@@ -422,11 +540,12 @@ object Downloader {
         task: Task,
         headers: Map<String, String>,
         onProgress: (received: Long, total: Long) -> Unit,
+        awaitUnpaused: suspend () -> Unit = {},
     ): Long = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "downloads").apply { mkdirs() }
         val temp = File(dir, "direct-${System.nanoTime()}-${task.fileName}")
         try {
-            fetchToFile(task.url, headers, temp, onProgress)
+            fetchToFile(task.url, headers, temp, awaitUnpaused, onProgress)
             publish(context, task, temp)
             temp.length()
         } finally {
@@ -438,6 +557,7 @@ object Downloader {
         url: String,
         headers: Map<String, String>,
         dest: File,
+        awaitUnpaused: suspend () -> Unit = {},
         onProgress: (received: Long, total: Long) -> Unit,
     ): Long = withContext(Dispatchers.IO) {
         val chunk = 512 * 1024L
@@ -446,6 +566,7 @@ object Downloader {
         var lastEmit = 0L
         dest.outputStream().use { output ->
             while (true) {
+                awaitUnpaused()
                 val end = if (total > 0L) {
                     (received + chunk - 1).coerceAtMost(total - 1)
                 } else {

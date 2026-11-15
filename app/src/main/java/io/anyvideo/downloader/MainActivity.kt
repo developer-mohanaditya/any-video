@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import io.anyvideo.downloader.ui.BrowserScreen
 import io.anyvideo.downloader.ui.BulkScreen
 import io.anyvideo.downloader.ui.CaptionScreen
+import io.anyvideo.downloader.ui.ClipScreen
+import io.anyvideo.downloader.ui.RingtoneScreen
 import io.anyvideo.downloader.ui.DownloadsScreen
 import io.anyvideo.downloader.ui.HomeScreen
 import io.anyvideo.downloader.ui.LineBreakScreen
@@ -64,7 +66,8 @@ import kotlinx.coroutines.delay
 
 enum class Screen {
     HOME, DOWNLOADS, BROWSE, TOOLS,
-    REPOST, CAPTIONS, GRID, SQUARE, RESIZE, DP, LINE_BREAK, WHATSAPP, BULK, SETTINGS,
+    REPOST, CAPTIONS, GRID, SQUARE, RESIZE, DP, LINE_BREAK, WHATSAPP, BULK,
+    CLIP, RINGTONE, SETTINGS,
 }
 
 class MainActivity : ComponentActivity() {
@@ -251,7 +254,13 @@ private fun AppRootContent(
     val showTabs = screen in setOf(
         Screen.HOME, Screen.DOWNLOADS, Screen.BROWSE, Screen.TOOLS, Screen.SETTINGS,
     )
-    BackHandler(enabled = screen != Screen.HOME) { screen = Screen.HOME }
+    BackHandler(enabled = screen != Screen.HOME) {
+        screen = when (screen) {
+            Screen.REPOST, Screen.CAPTIONS, Screen.GRID, Screen.SQUARE, Screen.RESIZE,
+            Screen.DP, Screen.LINE_BREAK, Screen.WHATSAPP, Screen.CLIP, Screen.RINGTONE -> Screen.TOOLS
+            else -> Screen.HOME
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -285,6 +294,8 @@ private fun AppRootContent(
 
                 Screen.REPOST -> RepostScreen(onBack = { screen = Screen.TOOLS })
                 Screen.CAPTIONS -> CaptionScreen(onBack = { screen = Screen.TOOLS })
+                Screen.CLIP -> ClipScreen(onBack = { screen = Screen.TOOLS })
+                Screen.RINGTONE -> RingtoneScreen(onBack = { screen = Screen.TOOLS })
                 Screen.GRID -> GridMakerScreen(onBack = { screen = Screen.TOOLS })
                 Screen.SQUARE -> SquarePhotoScreen(onBack = { screen = Screen.TOOLS })
                 Screen.RESIZE -> ResizeScreen(onBack = { screen = Screen.TOOLS })

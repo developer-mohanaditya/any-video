@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import io.anyvideo.downloader.R
 import io.anyvideo.downloader.util.Prefs
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +38,11 @@ class DownloadService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification(0, 0, true))
         watch = scope.launch {
             Downloader.tasks.collect { tasks ->
-                val active = tasks.filter { it.state == Downloader.State.QUEUED || it.state == Downloader.State.RUNNING }
+                val active = tasks.filter {
+                    it.state == Downloader.State.QUEUED ||
+                        it.state == Downloader.State.RUNNING ||
+                        it.state == Downloader.State.PAUSED
+                }
                 if (active.isEmpty()) {
                     stopSelf()
                     return@collect
@@ -63,13 +68,22 @@ class DownloadService : Service() {
     }
 
     private fun buildNotification(count: Int, percent: Int, indeterminate: Boolean): Notification {
+        val active = Downloader.tasks.value.filter {
+            it.state == Downloader.State.QUEUED ||
+                it.state == Downloader.State.RUNNING ||
+                it.state == Downloader.State.PAUSED
+        }
+        val paused = active.isNotEmpty() && active.all { it.state == Downloader.State.PAUSED }
         val title = when {
             count <= 0 -> "Preparing downloads"
+            paused && count == 1 -> "Download paused"
+            paused -> "$count downloads paused"
             count == 1 -> "Downloading 1 file"
             else -> "Downloading $count files"
         }
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setLargeIcon(appIcon())
             .setContentTitle(title)
             .setOngoing(true)
             .setSilent(true)
@@ -83,6 +97,11 @@ class DownloadService : Service() {
         }
         return builder.build()
     }
+
+    /** The expanded notification carries the actual app tile, not a generic download glyph. */
+    private fun appIcon() = runCatching {
+        ContextCompat.getDrawable(this, R.drawable.ic_launcher)?.toBitmap()
+    }.getOrNull()
 
     private fun notify(notification: Notification) {
         if (!Prefs.showDownloadNotifications) return
@@ -111,6 +130,11 @@ class DownloadService : Service() {
         fun start(context: Context) {
             val intent = Intent(context, DownloadService::class.java)
             runCatching { ContextCompat.startForegroundService(context, intent) }
+        }
+
+        fun stopIfIdle(context: Context) {
+            if (Downloader.busy) return
+            runCatching { context.stopService(Intent(context, DownloadService::class.java)) }
         }
     }
 }

@@ -1,5 +1,6 @@
 package io.anyvideo.downloader.net
 
+import io.anyvideo.downloader.data.FileNames
 import io.anyvideo.downloader.data.MediaCandidate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -328,7 +329,7 @@ object YouTubeFormats {
     private fun audioName(title: String, id: String): String =
         "${clampBytes(cleanedTitle(title), 160)} [$id].m4a"
 
-    private fun cleanedTitle(title: String): String = title
+    private fun cleanedTitle(title: String): String = FileNames.noEmDash(title)
         .replace(Regex("""[\\/:*?"<>|\r\n\t]"""), " ")
         .replace(Regex("""\s+"""), " ")
         .trim()

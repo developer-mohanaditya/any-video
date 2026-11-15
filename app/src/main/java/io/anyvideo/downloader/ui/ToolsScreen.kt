@@ -12,11 +12,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.FormatLineSpacing
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tag
@@ -42,6 +44,8 @@ private val downloadTools = listOf(
 )
 
 private val createTools = listOf(
+    Tool(Icons.Filled.ContentCut, "Clip video", "Trim a video range", Screen.CLIP),
+    Tool(Icons.Filled.MusicNote, "Ringtone maker", "Trim audio to a tone", Screen.RINGTONE),
     Tool(Icons.Filled.Share, "Repost", "Credit and share", Screen.REPOST),
     Tool(Icons.Filled.PhotoLibrary, "Captions", "Ready-made text", Screen.CAPTIONS),
     Tool(Icons.Filled.GridOn, "Grid maker", "Split into tiles", Screen.GRID),
@@ -66,7 +70,7 @@ fun ToolsScreen(onNavigate: (Screen) -> Unit) {
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "Edit, format and share: nine tools that work on your saved files.",
+                    "Edit, format and share: eleven tools that work on your saved files.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

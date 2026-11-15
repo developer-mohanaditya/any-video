@@ -20,6 +20,9 @@ data class MediaCandidate(
 )
 
 object FileNames {
+    /** Gallery labels never carry a typographic dash; a plain hyphen is the separator. */
+    fun noEmDash(value: String): String = value.replace(Regex("[\u2014\u2013]"), "-")
+
     fun build(user: String?, id: String, extension: String): String {
         val cleanUser = (user ?: "User").replace(Regex("[^A-Za-z0-9._]"), "").ifBlank { "User" }
         val cleanId = id.replace(Regex("[^A-Za-z0-9._-]"), "").ifBlank { System.currentTimeMillis().toString() }

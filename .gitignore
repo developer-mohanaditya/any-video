@@ -40,3 +40,6 @@ desktop.ini
 
 # The APK distributed with the release is kept in the repository on purpose
 !AnyVideo-*.apk
+
+# --- Project-local build toolchain -------------------------------------------
+.toolchain/

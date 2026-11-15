@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.7.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.7-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.8.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.8-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-11_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11 and newer" />
 
@@ -15,11 +15,11 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.3.7.apk`, about 1.7 MB.
+The installable file is `AnyVideo-1.3.8.apk`, about 1.7 MB.
 
-- Direct download: [AnyVideo-1.3.7.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.7.apk)
+- Direct download: [AnyVideo-1.3.8.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.8.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.3.7.apk](AnyVideo-1.3.7.apk)
+- Copy in the repository: [AnyVideo-1.3.8.apk](AnyVideo-1.3.8.apk)
 
 Android 11 or newer is the supported baseline. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
@@ -63,6 +63,17 @@ lookup, which is the fastest way to see where a private download stopped.
 Paste a YouTube link and choose a video quality up to 2160p, or choose Audio and then MP3 at 320,
 256, 128 or 96 kbps, M4A, or OGG. Audio only files go to `Music/anyvideo`.
 
+### Watch, trim and set a ringtone
+
+Tap Play on a completed download to open the full screen player. It keeps the video visible in a
+picture in picture window while you use another app, and has speed, sleep timer, subtitle and
+external player controls.
+
+Tools, Clip video picks a start and end from a local video and saves a trimmed copy to
+`Movies/anyvideo` without re-encoding. Tools, Ringtone maker trims an audio file, previews it, and
+saves it to `Ringtones/anyvideo`; the sound settings action lets you make it the ringtone,
+notification or alarm sound.
+
 ### Take a whole profile
 
 Open Tools, choose Bulk download, type the username, load the feed, select the posts and queue them.
@@ -82,9 +93,10 @@ original quality.
 
 ### Edit before posting
 
-Tools holds nine utilities: bulk download, WhatsApp status saver, repost overlay, caption library,
-grid splitter, no crop square, resize, circular DP maker and line break formatter. The image tools
-write their output to the same folders, so the result is in Downloads straight away.
+Tools holds eleven utilities: bulk download, WhatsApp status saver, clip video, ringtone maker,
+repost overlay, caption library, grid splitter, no crop square, resize, circular DP maker and line
+break formatter. The image tools write their output to the same folders, so the result is in
+Downloads straight away.
 
 ### Save WhatsApp statuses
 
@@ -102,7 +114,9 @@ pick to the usual folders.
 
 Downloads has separate Photos, Videos and Audio tabs. Swipe left and right to move between them,
 tap a tile to preview it full screen, and swipe left or right again in the preview to move through
-the rest of that tab. Long press a tile to select several, then share or delete them together. Active downloads show their progress at the top of the Home and Downloads screens.
+the rest of that tab. Long press a tile to select several, then share or delete them together.
+Active downloads show their progress in Active, and pause, resume or cancel from the card. The
+first newly queued download starts; later ones wait with a Start button.
 
 ## Instagram, and the risk that comes with it
 
@@ -163,6 +177,7 @@ is why it asks for `MANAGE_EXTERNAL_STORAGE` on Android 11 and newer.
 - Some newer Instagram reels come back from the resolver as their cover image. The app refuses to
   save that still and asks you to sign in to Instagram, which then fetches the video.
 - The app is distributed as an APK because `MANAGE_EXTERNAL_STORAGE` is restricted on Google Play.
+- Subtitles are not rendered yet. The subtitle control reports when a file has no subtitle track.
 
 ## Project policy
 
