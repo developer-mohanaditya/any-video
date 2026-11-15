@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
-import android.net.Uri
 import android.widget.MediaController
 import android.widget.Toast
 import android.widget.VideoView
@@ -12,7 +11,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculatePan
@@ -25,7 +23,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -34,26 +31,16 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
@@ -79,10 +66,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -118,52 +103,10 @@ fun DownloadsScreen() {
     }
 
     val tasks by Downloader.tasks.collectAsState()
-    val active = tasks.filter {
-        it.state == Downloader.State.QUEUED ||
-            it.state == Downloader.State.RUNNING ||
-            it.state == Downloader.State.PAUSED
-    }
-    val completed = tasks.filter { it.state == Downloader.State.DONE }
-    val failed = tasks.filter { it.state == Downloader.State.FAILED }
-    val doneCount = completed.size
-    var sessionTab by remember { mutableIntStateOf(0) }
+    val doneCount = tasks.count { it.state == Downloader.State.DONE }
 
-    fun taskKind(task: Downloader.Task): MediaKind = when {
-        task.isVideo -> MediaKind.VIDEO
-        Downloader.isAudio(task.fileName) -> MediaKind.AUDIO
-        else -> MediaKind.PHOTO
-    }
-
-    val openTask: (Downloader.Task) -> Unit = { task ->
-        scope.launch {
-            val media = withContext(Dispatchers.IO) {
-                Library.load(context, taskKind(task)).firstOrNull { it.name == task.fileName }
-            }
-            if (media == null) {
-                Toast.makeText(context, "That file is no longer in the gallery", Toast.LENGTH_SHORT).show()
-            } else if (media.kind == MediaKind.PHOTO) {
-                previewItems = listOf(media)
-                previewStart = 0
-                previewOpen = true
-            } else {
-                playerLauncher.launch(PlayerActivity.intent(context, media))
-            }
-        }
-    }
-    val shareTask: (Downloader.Task) -> Unit = { task ->
-        scope.launch {
-            val media = withContext(Dispatchers.IO) {
-                Library.load(context, taskKind(task)).firstOrNull { it.name == task.fileName }
-            }
-            if (media == null) {
-                Toast.makeText(context, "That file is no longer in the gallery", Toast.LENGTH_SHORT).show()
-            } else {
-                share(context, media)
-            }
-        }
-    }
-
-    // A finished transfer must show up in the grid without the user pulling to refresh.
+    // Keep the gallery current when a transfer finishes. Active, completed and failed session
+    // rows belong in the notification shade, not in the saved-file gallery.
     LaunchedEffect(doneCount) {
         if (doneCount > 0) refreshKey++
     }
@@ -185,8 +128,7 @@ fun DownloadsScreen() {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Downloads", style = MaterialTheme.typography.headlineSmall)
                         Text(
-                            if (active.isEmpty()) "Saved in Pictures, Movies and Music"
-                            else "Downloading ${active.size} file(s)",
+                            "Saved in Pictures, Movies and Music",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -199,41 +141,6 @@ fun DownloadsScreen() {
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            SessionTabs(
-                selected = sessionTab,
-                active = active.size,
-                completed = completed.size,
-                failed = failed.size,
-                onSelect = { sessionTab = it },
-            )
-            Text(
-                when (sessionTab) {
-                    1 -> "Completed downloads"
-                    2 -> "Failed downloads"
-                    else -> "Current downloads"
-                },
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 2.dp),
-            )
-            when (sessionTab) {
-                1 -> if (completed.isNotEmpty()) {
-                    CompletedDownloads(completed, openTask, shareTask)
-                } else {
-                    SessionEmpty("Finished downloads will appear here")
-                }
-                2 -> if (failed.isNotEmpty()) {
-                    FailedDownloads(failed)
-                } else {
-                    SessionEmpty("Failed downloads will appear here")
-                }
-                else -> if (active.isNotEmpty()) {
-                    ActiveDownloads(active)
-                } else {
-                    SessionEmpty("No active downloads")
-                }
-            }
-
             TabRow(
                 selectedTabIndex = pager.currentPage,
                 containerColor = MaterialTheme.colorScheme.background,
@@ -322,365 +229,6 @@ fun DownloadsScreen() {
             },
         )
     }
-}
-
-@Composable
-private fun SessionTabs(
-    selected: Int,
-    active: Int,
-    completed: Int,
-    failed: Int,
-    onSelect: (Int) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        listOf("Active" to active, "Completed" to completed, "Failed" to failed).forEachIndexed { index, entry ->
-            val chosen = selected == index
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(99.dp))
-                    .background(
-                        if (chosen) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surface,
-                    )
-                    .clickable { onSelect(index) }
-                    .padding(vertical = 7.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "${entry.first} ${entry.second}",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (chosen) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SessionEmpty(text: String) {
-    Text(
-        text,
-        fontSize = 10.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-    )
-}
-
-@Composable
-private fun CompletedDownloads(
-    tasks: List<Downloader.Task>,
-    onOpen: (Downloader.Task) -> Unit,
-    onShare: (Downloader.Task) -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        tasks.take(6).forEach { task ->
-            Card(
-                modifier = Modifier.fillMaxWidth().clickable { onOpen(task) },
-                shape = RoundedCornerShape(15.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(9.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            taskIcon(task),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
-                        Text(
-                            task.fileName,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            "${taskMeta(task)} · tap to open",
-                            fontSize = 9.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    StateChip(task)
-                    RoundAction(Icons.Filled.PlayArrow, "Play") { onOpen(task) }
-                    RoundAction(Icons.Filled.Share, "Share") { onShare(task) }
-                }
-            }
-        }
-        if (tasks.size > 6) {
-            Text(
-                "+${tasks.size - 6} more completed",
-                fontSize = 9.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun FailedDownloads(tasks: List<Downloader.Task>) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        tasks.take(6).forEach { task ->
-            FailedDownloadCard(task)
-        }
-        if (tasks.size > 6) {
-            Text(
-                "+${tasks.size - 6} more failed",
-                fontSize = 9.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun FailedDownloadCard(task: Downloader.Task) {
-    val context = LocalContext.current
-    var menu by remember(task.id) { mutableStateOf(false) }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(15.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(9.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Refresh,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-            Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
-                Text(
-                    task.fileName,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    task.error ?: "Could not finish this download",
-                    fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.error,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            TextButton(onClick = { Downloader.retry(context, task.id) }) {
-                Text("Retry", fontSize = 10.sp)
-            }
-            Box {
-                RoundAction(Icons.Filled.MoreVert, "More") { menu = true }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Remove from list") },
-                        onClick = {
-                            Downloader.remove(task.id)
-                            menu = false
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActiveDownloads(tasks: List<Downloader.Task>) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        tasks.take(3).forEach { task -> ActiveDownloadCard(task) }
-        if (tasks.size > 3) {
-            Text(
-                "+${tasks.size - 3} more in progress",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ActiveDownloadCard(task: Downloader.Task) {
-    val context = LocalContext.current
-    var menu by remember(task.id) { mutableStateOf(false) }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(30.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(9.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = taskIcon(task),
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text(
-                        task.fileName,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        taskMeta(task),
-                        fontSize = 9.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                StateChip(task)
-                if (task.state == Downloader.State.QUEUED) {
-                    RoundAction(Icons.Filled.PlayArrow, "Start download") {
-                        Downloader.start(context, task.id)
-                    }
-                }
-            }
-            if (task.state == Downloader.State.RUNNING || task.state == Downloader.State.PAUSED) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    LinearProgressIndicator(
-                        progress = { task.progress },
-                        modifier = Modifier.weight(1f).height(3.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                    RoundAction(
-                        icon = if (task.state == Downloader.State.PAUSED) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                        label = if (task.state == Downloader.State.PAUSED) "Resume" else "Pause",
-                    ) {
-                        if (task.state == Downloader.State.PAUSED) {
-                            Downloader.resume(context, task.id)
-                        } else {
-                            Downloader.pause(task.id)
-                        }
-                    }
-                    Box {
-                        RoundAction(Icons.Filled.MoreVert, "More") { menu = true }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Cancel download") },
-                                onClick = {
-                                    Downloader.cancel(task.id)
-                                    menu = false
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StateChip(task: Downloader.Task) {
-    val label = when (task.state) {
-        Downloader.State.QUEUED -> "Queued"
-        Downloader.State.PAUSED -> "Paused"
-        Downloader.State.FAILED -> "Failed"
-        Downloader.State.DONE -> "Saved"
-        else -> "${(task.progress * 100).toInt()}%"
-    }
-    Text(
-        label,
-        fontSize = 9.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onPrimaryContainer,
-        modifier = Modifier
-            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(99.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-    )
-}
-
-@Composable
-private fun RoundAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier.size(24.dp).clip(CircleShape).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = label,
-            modifier = Modifier.size(15.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-private fun taskIcon(task: Downloader.Task) = when {
-    task.isVideo -> Icons.Filled.Videocam
-    Downloader.isAudio(task.fileName) -> Icons.Filled.MusicNote
-    else -> Icons.Filled.Image
-}
-
-private fun taskMeta(task: Downloader.Task): String {
-    val kind = when {
-        task.isVideo -> "Video"
-        Downloader.isAudio(task.fileName) -> "Audio"
-        else -> "Photo"
-    }
-    val size = if (task.total > 0L) formatBytes(task.total) else task.mime ?: "File"
-    val state = when (task.state) {
-        Downloader.State.PAUSED -> "paused"
-        Downloader.State.QUEUED -> "waiting"
-        Downloader.State.FAILED -> "failed"
-        Downloader.State.DONE -> "saved"
-        else -> "${(task.progress * 100).toInt()}%"
-    }
-    return "$kind · $size · $state"
 }
 
 @Composable

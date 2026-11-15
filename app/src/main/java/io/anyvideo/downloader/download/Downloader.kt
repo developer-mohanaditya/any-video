@@ -222,8 +222,16 @@ object Downloader {
     private suspend fun drain(context: Context) {
         while (true) {
             val task = _tasks.value.firstOrNull {
-                it.state == State.RUNNING && started.contains(it.id)
+                (it.state == State.RUNNING && started.contains(it.id)) ||
+                    it.state == State.QUEUED
             } ?: return
+            // The gallery-only Downloads screen has no Start button, so a queued item starts
+            // as soon as the previous transfer in the batch finishes.
+            if (task.state == State.QUEUED) {
+                started.add(task.id)
+                update(task.id) { it.copy(state = State.RUNNING) }
+                continue
+            }
             started.remove(task.id)
             run(context, task, task.headers, viaProxy = false)
         }

@@ -227,6 +227,7 @@ private fun AppRootContent(
     onThemeChanged: (String) -> Unit,
 ) {
     var screen by remember { mutableStateOf(Screen.HOME) }
+    var browserFullscreen by remember { mutableStateOf(false) }
     var autoUrl by remember { mutableStateOf<String?>(null) }
     // What the Browser tab opens next; set by the Instagram sign-in actions.
     var browserUrl by remember { mutableStateOf("https://www.instagram.com") }
@@ -257,7 +258,8 @@ private fun AppRootContent(
 
     val showTabs = screen in setOf(
         Screen.HOME, Screen.DOWNLOADS, Screen.BROWSE, Screen.TOOLS, Screen.SETTINGS,
-    )
+    ) && !(screen == Screen.BROWSE && browserFullscreen)
+    LaunchedEffect(screen) { if (screen != Screen.BROWSE) browserFullscreen = false }
     BackHandler(enabled = screen != Screen.HOME) {
         screen = when (screen) {
             Screen.REPOST, Screen.CAPTIONS, Screen.GRID, Screen.SQUARE, Screen.RESIZE,
@@ -292,7 +294,10 @@ private fun AppRootContent(
 
                 Screen.DOWNLOADS -> DownloadsScreen()
 
-                Screen.BROWSE -> BrowserScreen(startUrl = browserUrl)
+                Screen.BROWSE -> BrowserScreen(
+                    startUrl = browserUrl,
+                    onFullscreenChanged = { browserFullscreen = it },
+                )
 
                 Screen.TOOLS -> ToolsScreen(onNavigate = { screen = it })
 

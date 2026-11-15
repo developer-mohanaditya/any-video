@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.8.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.8-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.9.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.9-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-11_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11 and newer" />
 
@@ -15,11 +15,11 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.3.8.apk`, about 1.7 MB.
+The installable file is `AnyVideo-1.3.9.apk`, about 1.7 MB.
 
-- Direct download: [AnyVideo-1.3.8.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.8.apk)
+- Direct download: [AnyVideo-1.3.9.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.9.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.3.8.apk](AnyVideo-1.3.8.apk)
+- Copy in the repository: [AnyVideo-1.3.9.apk](AnyVideo-1.3.9.apk)
 
 Android 11 or newer is the supported baseline. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
@@ -84,8 +84,9 @@ Pages are fetched a few at a time with a short pause between them, so a first ru
 ### Save something the app cannot parse
 
 Open the Browser tab and load the page. It is a plain browser with an address bar and a progress
-line, and it keeps the session used for private posts. Long press a video or image in the page to
-save the file it points at.
+line, and it keeps the session used for private posts. Tap Full screen to hide the address bar,
+the app tab bar and the system bars; swipe in full screen or tap the exit button to return. Long
+press a video or image in the page to save the file it points at.
 
 ### Repost with credit
 
@@ -114,11 +115,12 @@ pick to the usual folders.
 | YouTube video | `Movies/anyvideo` | `Me at the zoo - jawed [jNQXAC9IVRw].mp4` |
 | YouTube audio | `Music/anyvideo` | `Me at the zoo - jawed [jNQXAC9IVRw].mp3` |
 
-Downloads has separate Photos, Videos and Audio tabs. Swipe left and right to move between them,
-tap a tile to preview it full screen, and swipe left or right again in the preview to move through
-the rest of that tab. Long press a tile to select several, then share or delete them together.
-Active downloads show their progress in Active, and pause, resume or cancel from the card. The
-first newly queued download starts; later ones wait with a Start button.
+Downloads has separate Photos, Videos and Audio tabs for the files saved on your phone. Swipe
+left and right to move between them, tap a tile to preview it full screen, and swipe left or right
+again in the preview to move through the rest of that tab. Long press a tile to select several,
+then share or delete them together. Live download progress, completed files and failures appear
+in the system notification instead of taking over this screen. Pause, Resume and Cancel are in
+the notification while a transfer is running, and queued items start in order automatically.
 
 ## Instagram, and the risk that comes with it
 
