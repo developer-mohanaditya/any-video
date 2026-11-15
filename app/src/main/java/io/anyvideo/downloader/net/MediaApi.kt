@@ -17,6 +17,8 @@ data class YouTubeChoice(
     val quality: String,
     val audioFormat: String,
     val audioBitrate: String,
+    /** Null means do not download a caption sidecar for this request. */
+    val captionLanguage: String? = null,
 )
 
 /**
@@ -51,11 +53,13 @@ object MediaApi {
      */
     fun variant(pageUrl: String, choice: YouTubeChoice? = null): String {
         val options = requestOptions(pageUrl, choice)
-        return if (options.audioOnly) {
+        val base = if (options.audioOnly) {
             "audio/${options.audioFormat}/${options.audioBitrate}"
         } else {
             "auto/${options.quality}"
         }
+        val caption = choice?.captionLanguage?.takeIf { !options.audioOnly }
+        return if (caption == null) base else "$base/cap-$caption"
     }
 
     suspend fun resolve(

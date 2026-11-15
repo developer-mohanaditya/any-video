@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -38,6 +40,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
@@ -90,6 +93,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.anyvideo.downloader.R
 import io.anyvideo.downloader.Screen
+import io.anyvideo.downloader.data.CaptionTrack
 import io.anyvideo.downloader.data.MediaCandidate
 import io.anyvideo.downloader.download.Downloader
 import io.anyvideo.downloader.download.DownloadRegistry
@@ -177,7 +181,7 @@ fun HomeScreen(
         }
     }
 
-    /** Every supported link in the text, so a list of URLs queues in one go. */
+    /** Every supported link in the text, so a list of URLs starts in one go. */
     fun linksFrom(text: String): List<String> =
         text.split(Regex("\\s+"))
             .map { it.trim().trimEnd(',', ')', ';') }
@@ -231,7 +235,20 @@ fun HomeScreen(
         }
     }
 
-    /** Non-YouTube links download at once; YouTube opens the format sheet first. */
+    /** Saved YouTube settings, used for every YouTube link in a multi-link batch. */
+    fun savedYouTubeChoice() = YouTubeChoice(
+        audioOnly = Prefs.youtubeAudioOnly,
+        quality = YouTubeFormats.cappedQuality(Prefs.youtubeQuality),
+        audioFormat = Prefs.youtubeAudioFormat,
+        audioBitrate = Prefs.youtubeAudioBitrate,
+        captionLanguage = if (Prefs.youtubeCaptions) Prefs.youtubeCaptionLanguage else null,
+    )
+
+    /**
+     * A single YouTube link opens the format sheet. A batch is split into its individual links
+     * and each YouTube item uses the saved choice, because one picker cannot describe several
+     * different videos and probing the whole clipboard as one URL returns the wrong formats.
+     */
     fun submit(text: String) {
         val target = text.trim()
         hideKeyboard()
@@ -241,6 +258,19 @@ fun HomeScreen(
         }
         if (!hasPostPath(target)) {
             message = "That is a platform home page. Paste a post, reel or profile link."
+            return
+        }
+        val links = linksFrom(target)
+        if (links.size > 1) {
+            // The debounce above already saved this exact batch; a tap on the arrow must not
+            // download the same files twice.
+            if (target == handled && autoSaved) return
+            handled = target
+            fetch(
+                target = target,
+                auto = true,
+                youtubeChoice = if (links.any { isYouTubeLink(it) }) savedYouTubeChoice() else null,
+            )
             return
         }
         if (isYouTubeLink(target)) {
@@ -301,13 +331,14 @@ fun HomeScreen(
             availableHeights = youtubeAvailability?.heights.orEmpty()
                 .filter { it <= maxDirectHeight() },
             audioKbps = youtubeAvailability?.audioKbps,
+            captionTracks = youtubeAvailability?.captions.orEmpty(),
             probed = youtubeAvailability != null,
             checking = checkingYouTube,
             onDismiss = {
                 pendingYouTube = null
                 checkingYouTube = false
             },
-            onConfirm = { audio, quality, format, bitrate, bitrateChosen ->
+            onConfirm = { audio, quality, format, bitrate, bitrateChosen, captionLanguage ->
                 val cappedQuality = YouTubeFormats.cappedQuality(quality)
                 Prefs.youtubeAudioOnly = audio
                 Prefs.youtubeQuality = cappedQuality
@@ -317,6 +348,10 @@ fun HomeScreen(
                     effective = bitrate,
                     explicitlyChosen = bitrateChosen,
                 )
+                if (!audio) {
+                    Prefs.youtubeCaptions = captionLanguage != null
+                    if (captionLanguage != null) Prefs.youtubeCaptionLanguage = captionLanguage
+                }
                 pendingYouTube = null
                 checkingYouTube = false
                 handled = target
@@ -324,7 +359,13 @@ fun HomeScreen(
                 fetch(
                     target = target,
                     auto = true,
-                    youtubeChoice = YouTubeChoice(audio, cappedQuality, format, bitrate),
+                    youtubeChoice = YouTubeChoice(
+                        audioOnly = audio,
+                        quality = cappedQuality,
+                        audioFormat = format,
+                        audioBitrate = bitrate,
+                        captionLanguage = captionLanguage,
+                    ),
                 )
             },
         )
@@ -928,6 +969,7 @@ private fun audioBitrateOptions(audioKbps: Int?, probed: Boolean): List<Pair<Str
 private fun YouTubePickerDialog(
     availableHeights: List<Int>,
     audioKbps: Int?,
+    captionTracks: List<CaptionTrack>,
     probed: Boolean,
     checking: Boolean,
     onDismiss: () -> Unit,
@@ -937,14 +979,27 @@ private fun YouTubePickerDialog(
         format: String,
         bitrate: String,
         bitrateChosen: Boolean,
+        captionLanguage: String?,
     ) -> Unit,
 ) {
     var audio by remember { mutableStateOf(Prefs.youtubeAudioOnly) }
     var quality by remember { mutableStateOf(Prefs.youtubeQuality) }
     var format by remember { mutableStateOf(Prefs.youtubeAudioFormat) }
     var bitrate by remember { mutableStateOf(Prefs.youtubeAudioBitrate) }
+    var captions by remember { mutableStateOf(Prefs.youtubeCaptions) }
+    var captionLanguage by remember { mutableStateOf(Prefs.youtubeCaptionLanguage) }
     /** True only when the user tapped a bitrate chip; auto-fallback is not a preference. */
     var bitrateChosen by remember { mutableStateOf(false) }
+    val captionChoices = captionTracks.distinctBy { it.language }
+
+    LaunchedEffect(checking, captionChoices, captions) {
+        if (checking) return@LaunchedEffect
+        if (captionChoices.isEmpty()) {
+            captions = false
+        } else if (captions && captionChoices.none { it.language == captionLanguage }) {
+            captionLanguage = captionChoices.first().language
+        }
+    }
 
     // If the saved choice is not present for this video, ask the resolver for its best stream
     // instead of sending a height that cannot be fulfilled.
@@ -974,7 +1029,7 @@ private fun YouTubePickerDialog(
         containerColor = MaterialTheme.colorScheme.surface,
         title = { Text("Save from YouTube", fontWeight = FontWeight.SemiBold) },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OptionChip("Video", !audio) { audio = false }
                     Spacer(Modifier.width(6.dp))
@@ -1110,12 +1165,68 @@ private fun YouTubePickerDialog(
                             Spacer(Modifier.height(6.dp))
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = captions,
+                            onCheckedChange = { captions = it },
+                            enabled = !checking && captionChoices.isNotEmpty(),
+                        )
+                        Text(
+                            "Download captions if available",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (captionChoices.isEmpty() && !checking) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                    if (!checking && captionChoices.isEmpty()) {
+                        Text(
+                            if (probed) "No captions reported for this video."
+                            else "Could not check captions for this video.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else if (captions) {
+                        Text(
+                            "Caption language",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        captionChoices.chunked(2).forEach { rowOptions ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                rowOptions.forEach { track ->
+                                    OptionChip(
+                                        track.label,
+                                        captionLanguage == track.language,
+                                    ) { captionLanguage = track.language }
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
+                    }
                 }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(audio, quality, format, bitrate, bitrateChosen) },
+                onClick = {
+                    onConfirm(
+                        audio,
+                        quality,
+                        format,
+                        bitrate,
+                        bitrateChosen,
+                        if (!audio && captions && captionChoices.isNotEmpty()) {
+                            captionLanguage
+                        } else {
+                            null
+                        },
+                    )
+                },
                 // Neither choice may be confirmed while the real lists are unknown. A probe that
                 // succeeded without an audio track disables the audio download outright.
                 enabled = !checking && (!audio || audioAvailable),

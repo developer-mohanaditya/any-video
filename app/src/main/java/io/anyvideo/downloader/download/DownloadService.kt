@@ -84,6 +84,13 @@ class DownloadService : Service() {
             ACTION_RESUME -> if (id >= 0) Downloader.resume(this, id)
             ACTION_START -> if (id >= 0) Downloader.start(this, id)
             ACTION_CANCEL -> if (id >= 0) Downloader.cancel(id)
+            ACTION_RETRY -> if (id >= 0) {
+                // A retry reuses the task id, so clear the old failure event before the
+                // collector sees the task running again.
+                terminal.remove(id)
+                cancelFailedNotification(id)
+                Downloader.retry(this, id)
+            }
         }
         if (!Downloader.busy) stopSelf()
         return START_NOT_STICKY
@@ -186,7 +193,7 @@ class DownloadService : Service() {
             .setContentTitle("Download complete")
             .setContentText(task.fileName)
             .setStyle(NotificationCompat.BigTextStyle().bigText(task.fileName))
-            .setContentIntent(openApp())
+            .setContentIntent(openDownloads())
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -204,7 +211,12 @@ class DownloadService : Service() {
                 NotificationCompat.BigTextStyle()
                     .bigText("${task.fileName}\n${task.error ?: "Could not finish this download"}"),
             )
-            .setContentIntent(openApp())
+            .addAction(
+                android.R.drawable.ic_menu_rotate,
+                "Retry",
+                taskIntent(ACTION_RETRY, task.id),
+            )
+            .setContentIntent(openDownloads())
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -226,6 +238,26 @@ class DownloadService : Service() {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+    }
+
+    private fun openDownloads(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(MainActivity.EXTRA_OPEN_DOWNLOADS, true)
+        }
+        return PendingIntent.getActivity(
+            this,
+            1,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun cancelFailedNotification(taskId: Long) {
+        runCatching {
+            ContextCompat.getSystemService(this, NotificationManager::class.java)
+                ?.cancel(FAILED_NOTIFICATION_BASE + taskId.toInt())
+        }
     }
 
     private fun notify(notification: Notification, id: Int = NOTIFICATION_ID) {
@@ -280,6 +312,7 @@ class DownloadService : Service() {
         private const val ACTION_RESUME = "io.anyvideo.downloader.RESUME"
         private const val ACTION_START = "io.anyvideo.downloader.START"
         private const val ACTION_CANCEL = "io.anyvideo.downloader.CANCEL"
+        private const val ACTION_RETRY = "io.anyvideo.downloader.RETRY"
 
         fun start(context: Context) {
             val intent = Intent(context, DownloadService::class.java)

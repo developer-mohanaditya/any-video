@@ -1,5 +1,6 @@
 package io.anyvideo.downloader.net
 
+import io.anyvideo.downloader.data.CaptionTrack
 import io.anyvideo.downloader.data.FileNames
 import io.anyvideo.downloader.data.MediaCandidate
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,7 @@ object YouTubeFormats {
     data class Availability(
         val heights: List<Int>,
         val audioKbps: Int?,
+        val captions: List<CaptionTrack> = emptyList(),
     )
 
     /**
@@ -55,17 +57,48 @@ object YouTubeFormats {
      * 1440p/2160p, and AV1 for 2160p on Android versions whose MediaMuxer supports it. The caller
      * merges the two tracks.
      */
-    suspend fun direct(pageUrl: String, quality: String): MediaCandidate? =
+    suspend fun direct(
+        pageUrl: String,
+        quality: String,
+        captionLanguage: String? = null,
+    ): MediaCandidate? = withContext(Dispatchers.IO) {
+        val body = visionosPlayer(pageUrl) ?: return@withContext null
+        val candidate = parseDirect(
+            body = body,
+            pageUrl = pageUrl,
+            quality = quality,
+            allowAv1 = android.os.Build.VERSION.SDK_INT >= 34,
+            allowVp9 = android.os.Build.VERSION.SDK_INT >= 29,
+            captionLanguage = captionLanguage,
+        ) ?: return@withContext null
+        if (captionLanguage == null || candidate.caption != null) return@withContext candidate
+        // Some visionOS replies omit captions while the Android player response still lists them.
+        candidate.copy(caption = androidCaptionTrack(pageUrl, captionLanguage))
+    }
+
+    /** Fetches just the chosen caption track, for the resolver fallback path. */
+    suspend fun captionTrack(pageUrl: String, language: String?): CaptionTrack? =
         withContext(Dispatchers.IO) {
-            val body = visionosPlayer(pageUrl) ?: return@withContext null
-            parseDirect(
-                body = body,
-                pageUrl = pageUrl,
-                quality = quality,
-                allowAv1 = android.os.Build.VERSION.SDK_INT >= 34,
-                allowVp9 = android.os.Build.VERSION.SDK_INT >= 29,
-            )
+            if (language.isNullOrBlank()) return@withContext null
+            val body = visionosPlayer(pageUrl)
+            val root = body?.let { runCatching { JSONObject(it) }.getOrNull() }
+            root?.let { chooseCaption(it, language) } ?: androidCaptionTrack(pageUrl, language)
         }
+
+    /**
+     * Caption tracks can be absent from the direct player reply even when the Android player
+     * lists them. The Android reply is therefore a small, explicit fallback for a requested track.
+     */
+    private fun androidCaptionTrack(pageUrl: String, language: String?): CaptionTrack? {
+        if (language.isNullOrBlank()) return null
+        val id = videoId(pageUrl) ?: return null
+        for (version in CLIENT_VERSIONS) {
+            val reply = playerReply(id, version) ?: continue
+            val root = reply.body?.let { runCatching { JSONObject(it) }.getOrNull() } ?: continue
+            chooseCaption(root, language)?.let { return it }
+        }
+        return null
+    }
 
     /** The original AAC track as M4A, for when the resolver cannot produce an audio file. */
     suspend fun directAudio(pageUrl: String): MediaCandidate? =
@@ -178,8 +211,9 @@ object YouTubeFormats {
         // A login wall, region block or removed video is a failed probe, not a video with no
         // formats. The picker then keeps its permissive fallback instead of disabling audio.
         if (root.optJSONObject("playabilityStatus")?.optString("status") != "OK") return null
+        val captions = parseCaptionTracks(root)
         val streaming = root.optJSONObject("streamingData")
-            ?: return Availability(emptyList(), null)
+            ?: return Availability(emptyList(), null, captions)
         val formats = formats(streaming)
         // A player reply can list a height without a playable URL, especially for formats the
         // client is not allowed to download. Those are not choices this app can offer, and
@@ -205,7 +239,7 @@ object YouTubeFormats {
             ?.div(1000L)
             ?.toInt()
             ?.takeIf { it > 0 }
-        return Availability(heights, audioKbps)
+        return Availability(heights, audioKbps, captions)
     }
 
     /** Picks a video and the default AAC track from one visionOS player reply. */
@@ -215,6 +249,7 @@ object YouTubeFormats {
         quality: String,
         allowAv1: Boolean = false,
         allowVp9: Boolean = true,
+        captionLanguage: String? = null,
     ): MediaCandidate? {
         if (body.isNullOrBlank()) return null
         val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
@@ -278,6 +313,7 @@ object YouTubeFormats {
             thumbnailUrl = "https://i.ytimg.com/vi/$id/hqdefault.jpg",
             isVideo = true,
             sourceUrl = pageUrl,
+            caption = chooseCaption(root, captionLanguage),
         )
     }
 
@@ -313,6 +349,44 @@ object YouTubeFormats {
             it.optJSONObject("audioTrack")?.optBoolean("audioIsDefault") == true
         }.maxByOrNull { it.optLong("bitrate", 0L) }
             ?: audios.maxByOrNull { it.optLong("bitrate", 0L) }
+    }
+
+    private fun chooseCaption(root: JSONObject, language: String?): CaptionTrack? {
+        if (language.isNullOrBlank()) return null
+        val wanted = language.trim().lowercase()
+        val matches = parseCaptionTracks(root).filter {
+            val code = it.language.lowercase()
+            code == wanted || code.substringBefore('-') == wanted || code.startsWith("$wanted-")
+        }
+        return matches.firstOrNull { !it.autoGenerated } ?: matches.firstOrNull()
+    }
+
+    /** Caption tracks are listed in the same player reply as the media streams. */
+    internal fun parseCaptionTracks(root: JSONObject): List<CaptionTrack> {
+        val renderer = root.optJSONObject("captions")
+            ?.optJSONObject("playerCaptionsTracklistRenderer")
+            ?: return emptyList()
+        val tracks = renderer.optJSONArray("captionTracks") ?: return emptyList()
+        val result = ArrayList<CaptionTrack>(tracks.length())
+        for (index in 0 until tracks.length()) {
+            val track = tracks.optJSONObject(index) ?: continue
+            val url = track.optString("baseUrl")
+            val language = track.optString("languageCode")
+            if (url.isBlank() || language.isBlank()) continue
+            val name = track.optJSONObject("name")
+            val simple = name?.optString("simpleText").orEmpty()
+            val runs = name?.optJSONArray("runs")
+            val runText = runs?.optJSONObject(0)?.optString("text").orEmpty()
+            val auto = track.optString("kind").equals("asr", true)
+            val label = (simple.ifBlank { runText }).ifBlank { language }
+            result += CaptionTrack(
+                language = language,
+                label = if (auto && !label.contains("auto", true)) "$label (auto)" else label,
+                url = url,
+                autoGenerated = auto,
+            )
+        }
+        return result.distinctBy { it.language to it.autoGenerated }
     }
 
     private fun visitorData(html: String): String? = Regex("\"visitorData\":\"(.*?)\"")

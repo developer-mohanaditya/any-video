@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.9.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.3.9-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.4.0.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.4.0-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-11_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11 and newer" />
 
@@ -15,11 +15,11 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.3.9.apk`, about 1.7 MB.
+The installable file is `AnyVideo-1.4.0.apk`, about 1.8 MB.
 
-- Direct download: [AnyVideo-1.3.9.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.3.9.apk)
+- Direct download: [AnyVideo-1.4.0.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.4.0.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.3.9.apk](AnyVideo-1.3.9.apk)
+- Copy in the repository: [AnyVideo-1.4.0.apk](AnyVideo-1.4.0.apk)
 
 Android 11 or newer is the supported baseline. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
@@ -63,13 +63,19 @@ lookup, which is the fastest way to see where a private download stopped.
 ### Keep a YouTube video, or only the sound
 
 Paste a YouTube link and choose a video quality up to 2160p, or choose Audio and then MP3 at 320,
-256, 128 or 96 kbps, M4A, or OGG. Audio only files go to `Music/anyvideo`.
+256, 128 or 96 kbps, M4A, or OGG. The video picker can also download a caption track in the
+language the video offers. Audio only files go to `Music/anyvideo`.
 
 ### Watch, trim and set a ringtone
 
-Tap Play on a completed download to open the full screen player. It keeps the video visible in a
-picture in picture window while you use another app, and has speed, sleep timer, subtitle and
-external player controls.
+Tap Play on a completed download to open the full screen player. It keeps the screen awake while
+playing and keeps the video visible in a picture in picture window shaped like the video, including
+vertical clips, while you use another app. It has speed, sleep timer, orientation, caption and
+external player controls. The More menu locks orientation to Auto, Portrait or Landscape.
+
+Captions open from the CC button. They can be turned off, switched between downloaded sidecars, or
+styled with Size, Background, Position and Lines. Long press the active caption to copy it or share
+it with its timestamp.
 
 Tools, Clip video picks a start and end from a local video and saves a trimmed copy to
 `Movies/anyvideo` without re-encoding. Tools, Ringtone maker trims an audio file, previews it, and
@@ -120,7 +126,7 @@ left and right to move between them, tap a tile to preview it full screen, and s
 again in the preview to move through the rest of that tab. Long press a tile to select several,
 then share or delete them together. Live download progress, completed files and failures appear
 in the system notification instead of taking over this screen. Pause, Resume and Cancel are in
-the notification while a transfer is running, and queued items start in order automatically.
+the notification while transfers run, and batches start automatically.
 
 ## Instagram, and the risk that comes with it
 
@@ -184,7 +190,10 @@ is why it asks for `MANAGE_EXTERNAL_STORAGE` on Android 11 and newer.
 - The app is distributed as an APK because `MANAGE_EXTERNAL_STORAGE` is restricted on Google Play.
 - Android does not allow silent self-installs. The app downloads and verifies the APK, but Android
   still asks you to allow installs from AnyVideo and to confirm the replacement.
-- Subtitles are not rendered yet. The subtitle control reports when a file has no subtitle track.
+- Captions are available only for YouTube downloads whose picker offered a caption track. A
+  video without a downloaded sidecar shows `No subtitles` in the CC menu.
+- Caption styling, the selected orientation and the long-press actions are available only in the
+  built-in player. Opening the file in another app uses that app's caption support.
 
 ## Project policy
 

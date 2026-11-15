@@ -143,11 +143,13 @@ object Library {
     }.getOrDefault(false)
 
     fun delete(context: Context, media: SavedMedia): Boolean = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val deleted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             context.contentResolver.delete(media.uri, null, null) > 0
         } else {
             media.path?.let { File(it).delete() } ?: false
         }
+        if (deleted) CaptionStore.delete(context, media.name)
+        deleted
     } catch (t: Throwable) {
         false
     }

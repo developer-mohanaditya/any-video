@@ -75,6 +75,7 @@ enum class Screen {
 class MainActivity : ComponentActivity() {
 
     private var incomingUrl by mutableStateOf<String?>(null)
+    private var openDownloads by mutableStateOf(false)
     private var showSplash by mutableStateOf(false)
     private var windowReady by mutableStateOf(false)
 
@@ -88,6 +89,8 @@ class MainActivity : ComponentActivity() {
             AppRoot(
                 incomingUrl = incomingUrl,
                 onIncomingConsumed = { incomingUrl = null },
+                openDownloads = openDownloads,
+                onOpenDownloadsConsumed = { openDownloads = false },
                 showSplash = showSplash,
                 windowReady = windowReady,
                 onSplashFinished = { showSplash = false },
@@ -115,6 +118,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
+        if (intent.getBooleanExtra(EXTRA_OPEN_DOWNLOADS, false)) openDownloads = true
         val text = when (intent.action) {
             Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
             Intent.ACTION_VIEW -> intent.dataString
@@ -123,6 +127,10 @@ class MainActivity : ComponentActivity() {
         // The whole text is forwarded: the home screen splits it, so a shared list of links
         // queues every one of them instead of only the first.
         if (!text.isNullOrBlank()) incomingUrl = text.trim()
+    }
+
+    companion object {
+        const val EXTRA_OPEN_DOWNLOADS = "io.anyvideo.downloader.OPEN_DOWNLOADS"
     }
 
     /**
@@ -183,6 +191,8 @@ private fun requiredPermissions(): Array<String> {
 private fun AppRoot(
     incomingUrl: String?,
     onIncomingConsumed: () -> Unit,
+    openDownloads: Boolean,
+    onOpenDownloadsConsumed: () -> Unit,
     showSplash: Boolean,
     windowReady: Boolean,
     onSplashFinished: () -> Unit,
@@ -198,6 +208,8 @@ private fun AppRoot(
             AppRootContent(
                 incomingUrl = incomingUrl,
                 onIncomingConsumed = onIncomingConsumed,
+                openDownloads = openDownloads,
+                onOpenDownloadsConsumed = onOpenDownloadsConsumed,
                 themeMode = themeMode,
                 onThemeChanged = { themeMode = it },
             )
@@ -223,6 +235,8 @@ private fun AppRoot(
 private fun AppRootContent(
     incomingUrl: String?,
     onIncomingConsumed: () -> Unit,
+    openDownloads: Boolean,
+    onOpenDownloadsConsumed: () -> Unit,
     themeMode: String,
     onThemeChanged: (String) -> Unit,
 ) {
@@ -248,11 +262,17 @@ private fun AppRootContent(
         }
     }
 
-    LaunchedEffect(incomingUrl) {
-        if (!incomingUrl.isNullOrBlank()) {
-            autoUrl = incomingUrl
-            screen = Screen.HOME
-            onIncomingConsumed()
+    LaunchedEffect(incomingUrl, openDownloads) {
+        when {
+            openDownloads -> {
+                screen = Screen.DOWNLOADS
+                onOpenDownloadsConsumed()
+            }
+            !incomingUrl.isNullOrBlank() -> {
+                autoUrl = incomingUrl
+                screen = Screen.HOME
+                onIncomingConsumed()
+            }
         }
     }
 

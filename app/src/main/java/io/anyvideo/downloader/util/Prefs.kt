@@ -71,6 +71,39 @@ object Prefs {
         get() = sp.getBoolean("youtube_audio_only", false)
         set(value) = sp.edit().putBoolean("youtube_audio_only", value).apply()
 
+    /** YouTube: also save a caption sidecar when the selected language is available. */
+    var youtubeCaptions: Boolean
+        get() = sp.getBoolean("youtube_captions", false)
+        set(value) = sp.edit().putBoolean("youtube_captions", value).apply()
+
+    /** YouTube: language code used for the caption sidecar. */
+    var youtubeCaptionLanguage: String
+        get() = sp.getString("youtube_caption_language", "en") ?: "en"
+        set(value) = sp.edit().putString("youtube_caption_language", value).apply()
+
+    /** Player orientation: "auto", "portrait" or "landscape". */
+    var playerOrientation: String
+        get() = sp.getString("player_orientation", "auto")
+            ?.takeIf { it == "auto" || it == "portrait" || it == "landscape" } ?: "auto"
+        set(value) = sp.edit().putString("player_orientation", value).apply()
+
+    /** Caption appearance indices used by the player menu. */
+    var captionSize: Int
+        get() = sp.getInt("caption_size", 0)
+        set(value) = sp.edit().putInt("caption_size", value).apply()
+
+    var captionBackground: Int
+        get() = sp.getInt("caption_background", 1)
+        set(value) = sp.edit().putInt("caption_background", value).apply()
+
+    var captionPosition: Int
+        get() = sp.getInt("caption_position", 1)
+        set(value) = sp.edit().putInt("caption_position", value).apply()
+
+    var captionLines: Int
+        get() = sp.getInt("caption_lines", 3)
+        set(value) = sp.edit().putInt("caption_lines", value).apply()
+
     var youtubeAudioFormat: String
         get() = sp.getString("youtube_audio_format", "mp3") ?: "mp3"
         set(value) = sp.edit().putString("youtube_audio_format", value).apply()

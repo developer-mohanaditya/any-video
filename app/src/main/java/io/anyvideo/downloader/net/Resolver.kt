@@ -127,8 +127,9 @@ object Resolver {
             !(choice?.audioOnly ?: Prefs.youtubeAudioOnly)
         ) {
             val direct = YouTubeFormats.direct(
-                url,
-                choice?.quality ?: Prefs.youtubeQuality,
+                pageUrl = url,
+                quality = choice?.quality ?: Prefs.youtubeQuality,
+                captionLanguage = choice?.captionLanguage,
             )
             if (direct != null) return ResolveOutcome(listOf(direct), "Resolved directly from YouTube")
         }
@@ -162,7 +163,14 @@ object Resolver {
                                 "Instagram from Settings, then try the link again.",
                         )
                     }
-                    return ResolveOutcome(api.candidates, "Resolved via the resolver API")
+                    val caption = if (choice?.captionLanguage != null) {
+                        YouTubeFormats.captionTrack(url, choice.captionLanguage)
+                    } else {
+                        null
+                    }
+                    val candidates = if (caption == null) api.candidates
+                    else api.candidates.map { it.copy(caption = caption) }
+                    return ResolveOutcome(candidates, "Resolved via the resolver API")
                 }
                 apiError = api.error
                 // A rate-limit window on the instance is measured in tens of seconds, so a quick

@@ -17,6 +17,8 @@ data class MediaCandidate(
     val audioUrl: String? = null,
     /** Download in short range requests, needed for YouTube's throttled audio CDN. */
     val chunked: Boolean = false,
+    /** Selected caption track to save as a sidecar after this file is published. */
+    val caption: CaptionTrack? = null,
 )
 
 object FileNames {

@@ -12,6 +12,8 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
+import io.anyvideo.downloader.data.CaptionStore
+import io.anyvideo.downloader.data.CaptionTrack
 import io.anyvideo.downloader.data.Library
 import io.anyvideo.downloader.net.MediaApi
 import io.anyvideo.downloader.net.YouTubeFormats
@@ -25,6 +27,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
@@ -63,6 +66,7 @@ object Downloader {
         val headers: Map<String, String> = emptyMap(),
         val audioUrl: String? = null,
         val chunked: Boolean = false,
+        val caption: CaptionTrack? = null,
         val state: State = State.QUEUED,
         val received: Long = 0L,
         val total: Long = 0L,
@@ -92,8 +96,6 @@ object Downloader {
 
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
-    private var queueBusy = false
-    private val started = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private val pauseGates = java.util.concurrent.ConcurrentHashMap<Long, CompletableDeferred<Unit>>()
     private val cancelled = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
 
@@ -122,8 +124,8 @@ object Downloader {
         "${standardDirectory(candidate)}/anyvideo"
 
     /**
-     * Queues one item. Returns false when it is already downloading or already saved, which is
-     * what keeps a double tap or a repeated carousel enqueue from writing every file twice.
+     * Starts one item as soon as it is accepted. Returns false when it is already downloading
+     * or already saved, which keeps a double tap or a repeated carousel from writing twice.
      */
     fun enqueue(context: Context, candidate: MediaCandidate): Boolean {
         val app = context.applicationContext
@@ -146,15 +148,15 @@ object Downloader {
             headers = candidate.headers,
             audioUrl = candidate.audioUrl,
             chunked = candidate.chunked,
+            caption = candidate.caption,
         )
-        _tasks.value = _tasks.value + task
+        _tasks.update { it + task }
         candidate.sourceUrl?.let { DownloadRegistry.rememberSource(app, it) }
-        if (!queueBusy) {
-            started.add(task.id)
-            update(task.id) { it.copy(state = State.RUNNING) }
-            kick(app)
-        }
+        // Start every item in a batch right away. The download semaphore keeps the network
+        // load bounded while a pasted list or carousel no longer waits behind a hidden queue.
+        update(task.id) { it.copy(state = State.RUNNING) }
         DownloadService.start(app)
+        launch(app, task, task.headers, viaProxy = false)
         return true
     }
 
@@ -162,7 +164,7 @@ object Downloader {
     fun isSaved(context: Context, candidate: MediaCandidate): Boolean =
         Library.exists(context.applicationContext, folderFor(candidate), candidate.fileName)
 
-    /** Queues what is not queued or saved yet, and reports how many transfers actually started. */
+    /** Starts every candidate not already active or saved, and reports how many were accepted. */
     fun enqueueAll(context: Context, candidates: List<MediaCandidate>): Int =
         candidates.count { enqueue(context, it) }
 
@@ -171,10 +173,9 @@ object Downloader {
         if (task.state != State.FAILED) return
         cancelled.remove(id)
         pauseGates.remove(id)?.complete(Unit)
-        started.add(id)
         update(task.id) { it.copy(state = State.RUNNING, received = 0, error = null) }
         DownloadService.start(context.applicationContext)
-        kick(context.applicationContext)
+        launch(context.applicationContext, task, task.headers, viaProxy = false)
     }
 
     /** Suspends the transfer between chunks, keeping its bytes and connection intact. */
@@ -190,51 +191,16 @@ object Downloader {
         if (task.state != State.PAUSED) return
         cancelled.remove(id)
         pauseGates.remove(id)?.complete(Unit)
-        started.add(id)
         update(id) { it.copy(state = State.RUNNING) }
-        DownloadService.start(context.applicationContext)
-        kick(context)
     }
 
     /** Starts one queued download without touching the active one. */
     fun start(context: Context, id: Long) {
         val task = _tasks.value.firstOrNull { it.id == id } ?: return
         if (task.state != State.QUEUED) return
-        started.add(id)
         update(id) { it.copy(state = State.RUNNING) }
         DownloadService.start(context.applicationContext)
-        kick(context)
-    }
-
-    private fun kick(context: Context) {
-        if (queueBusy) return
-        queueBusy = true
-        scope.launch {
-            try {
-                drain(context)
-            } finally {
-                queueBusy = false
-                DownloadService.stopIfIdle(context)
-            }
-        }
-    }
-
-    private suspend fun drain(context: Context) {
-        while (true) {
-            val task = _tasks.value.firstOrNull {
-                (it.state == State.RUNNING && started.contains(it.id)) ||
-                    it.state == State.QUEUED
-            } ?: return
-            // The gallery-only Downloads screen has no Start button, so a queued item starts
-            // as soon as the previous transfer in the batch finishes.
-            if (task.state == State.QUEUED) {
-                started.add(task.id)
-                update(task.id) { it.copy(state = State.RUNNING) }
-                continue
-            }
-            started.remove(task.id)
-            run(context, task, task.headers, viaProxy = false)
-        }
+        launch(context.applicationContext, task, task.headers, viaProxy = false)
     }
 
     private suspend fun awaitUnpaused(id: Long) {
@@ -250,37 +216,34 @@ object Downloader {
     fun cancel(id: Long) {
         val task = _tasks.value.firstOrNull { it.id == id } ?: return
         cancelled.add(id)
-        started.remove(id)
         pauseGates.remove(id)?.complete(Unit)
         synchronized(inFlight) { inFlight.remove("${task.relativePath}/${task.fileName}") }
         update(id) { it.copy(state = State.FAILED, error = "Cancelled") }
     }
 
     fun clearFinished() {
-        val remaining = _tasks.value.filter {
-            it.state == State.QUEUED || it.state == State.RUNNING || it.state == State.PAUSED
+        _tasks.update { tasks ->
+            tasks.filter {
+                it.state == State.QUEUED || it.state == State.RUNNING || it.state == State.PAUSED
+            }
         }
-        _tasks.value = remaining
-        val ids = remaining.map { it.id }.toSet()
+        val ids = _tasks.value.map { it.id }.toSet()
         cancelled.retainAll(ids)
-        started.retainAll(ids)
     }
 
     /** Failed rows are session feedback, not gallery history. Drop them when the app leaves. */
     fun clearFailed() {
-        _tasks.value = _tasks.value.filter { it.state != State.FAILED }
+        _tasks.update { tasks -> tasks.filter { it.state != State.FAILED } }
         val ids = _tasks.value.map { it.id }.toSet()
         cancelled.retainAll(ids)
-        started.retainAll(ids)
     }
 
     /** Drops one finished or failed row without touching its gallery file. */
     fun remove(id: Long) {
         val task = _tasks.value.firstOrNull { it.id == id } ?: return
         if (task.state == State.RUNNING || task.state == State.PAUSED) return
-        _tasks.value = _tasks.value.filterNot { it.id == id }
+        _tasks.update { tasks -> tasks.filterNot { it.id == id } }
         cancelled.remove(id)
-        started.remove(id)
         pauseGates.remove(id)?.complete(Unit)
     }
 
@@ -732,6 +695,7 @@ object Downloader {
                 // without a file is exactly the ghost tile this engine exists to avoid.
                 val written = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: 0L
                 if (written <= 0L) throw IllegalStateException("The file did not reach storage")
+                CaptionStore.save(context, targetName, task.caption)
             } catch (t: Throwable) {
                 runCatching { resolver.delete(uri, null, null) }
                 if (attempt < 5 && t.message.orEmpty().contains("UNIQUE", ignoreCase = true)) {
@@ -754,6 +718,7 @@ object Downloader {
                 task.mime?.let { arrayOf(it) },
                 null,
             )
+            CaptionStore.save(context, task.fileName, task.caption)
         }
     }
 
@@ -814,7 +779,9 @@ object Downloader {
     }
 
     private fun update(id: Long, change: (Task) -> Task) {
-        _tasks.value = _tasks.value.map { if (it.id == id) change(it) else it }
+        // Up to three transfers update progress at once, so never read and replace the list in
+        // two separate steps: an atomic update keeps one file's progress from erasing another's.
+        _tasks.update { tasks -> tasks.map { if (it.id == id) change(it) else it } }
     }
 
     /**
