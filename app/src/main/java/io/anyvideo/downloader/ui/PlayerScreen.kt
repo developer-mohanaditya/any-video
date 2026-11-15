@@ -13,6 +13,7 @@ import android.media.PlaybackParams
 import android.net.Uri
 import android.os.Build
 import android.util.Rational
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.WindowManager
@@ -75,6 +76,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -107,7 +109,9 @@ import io.anyvideo.downloader.data.MimeTypes
 import io.anyvideo.downloader.data.SavedMedia
 import io.anyvideo.downloader.util.Prefs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
@@ -187,6 +191,12 @@ fun FullscreenPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var moreOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val pauseTapScope = rememberCoroutineScope()
+    var pendingPauseTap by remember { mutableStateOf<Job?>(null) }
+    val currentControlsVisible = rememberUpdatedState(controlsVisible)
+    val currentPlaying = rememberUpdatedState(playing)
+    val currentPosition = rememberUpdatedState(position)
+    val currentDuration = rememberUpdatedState(duration)
 
     LaunchedEffect(media.name) {
         val files = withContext(Dispatchers.IO) {
@@ -307,8 +317,29 @@ fun FullscreenPlayer(
     }
     val latestCue = rememberUpdatedState(visibleCue)
 
-    // The video view handles taps on the picture itself. This catches taps on the letterboxed
-    // area around it so the whole player surface behaves like a toggle.
+    fun seekBy(deltaMs: Long) {
+        val target = (currentPosition.value + deltaMs)
+            .coerceIn(0L, currentDuration.value.coerceAtLeast(0L))
+        position = target
+        videoView?.seekTo(target.toInt())
+    }
+
+    fun togglePlayback() {
+        if (currentPlaying.value) videoView?.pause() else videoView?.start()
+        playing = !currentPlaying.value
+    }
+
+    fun handleDoubleTap(x: Float, width: Float) {
+        if (width <= 0f) return
+        when {
+            x < width * 0.35f -> seekBy(-10_000L)
+            x > width * 0.65f -> seekBy(10_000L)
+            else -> togglePlayback()
+        }
+    }
+
+    // The video view handles taps and double taps on the picture itself. This catches single
+    // taps on the letterboxed area around it so the whole player surface toggles the controls.
     val letterboxTaps = if (!pipMode) {
         Modifier.pointerInput(controlsVisible) {
             detectTapGestures { controlsVisible = !controlsVisible }
@@ -330,7 +361,40 @@ fun FullscreenPlayer(
                             var downX = 0f
                             var dragging = false
                             val touchSlop = ViewConfiguration.get(viewContext).scaledTouchSlop
+                            val gestureDetector = GestureDetector(
+                                viewContext,
+                                object : GestureDetector.SimpleOnGestureListener() {
+                                    override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                                        val metrics = resources.displayMetrics
+                                        val centerSlop = 44f * metrics.density
+                                        val location = IntArray(2)
+                                        getLocationOnScreen(location)
+                                        val screenX = e.x + location[0]
+                                        val screenY = e.y + location[1]
+                                        val centerTap = currentControlsVisible.value &&
+                                            abs(screenX - metrics.widthPixels / 2f) <= centerSlop &&
+                                            abs(screenY - metrics.heightPixels / 2f) <= centerSlop
+                                        if (centerTap) {
+                                            togglePlayback()
+                                        } else {
+                                            controlsVisible = !controlsVisible
+                                        }
+                                        return true
+                                    }
+
+                                    override fun onDoubleTap(e: MotionEvent): Boolean {
+                                        val location = IntArray(2)
+                                        getLocationOnScreen(location)
+                                        handleDoubleTap(
+                                            e.x + location[0],
+                                            resources.displayMetrics.widthPixels.toFloat(),
+                                        )
+                                        return true
+                                    }
+                                },
+                            )
                             setOnTouchListener { view, event ->
+                                gestureDetector.onTouchEvent(event)
                                 when (event.actionMasked) {
                                     MotionEvent.ACTION_DOWN -> {
                                         downX = event.x
@@ -341,9 +405,7 @@ fun FullscreenPlayer(
                                     }
                                     MotionEvent.ACTION_UP -> {
                                         val dx = event.x - downX
-                                        if (!dragging) {
-                                            controlsVisible = !controlsVisible
-                                        } else if (abs(dx) > view.width * 0.12f) {
+                                        if (dragging && abs(dx) > view.width * 0.12f) {
                                             if (dx < 0) onNext?.invoke() else onPrevious?.invoke()
                                         }
                                     }
@@ -471,8 +533,18 @@ fun FullscreenPlayer(
                     ) {
                         IconButton(
                             onClick = {
-                                if (playing) videoView?.pause() else videoView?.start()
-                                playing = !playing
+                                val pending = pendingPauseTap
+                                if (pending != null) {
+                                    pending.cancel()
+                                    pendingPauseTap = null
+                                    togglePlayback()
+                                } else {
+                                    pendingPauseTap = pauseTapScope.launch {
+                                        delay(300)
+                                        pendingPauseTap = null
+                                        togglePlayback()
+                                    }
+                                }
                             },
                             modifier = Modifier.size(62.dp),
                         ) {
