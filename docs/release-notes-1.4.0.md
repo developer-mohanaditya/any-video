@@ -45,6 +45,9 @@ project key as 1.3.9, so it installs over it and keeps your settings and downloa
 - `:app:testDebugUnitTest` and `:app:assembleRelease` pass.
 - The signed 1.4.0 APK installs over 1.3.9 on the API 35 emulator as versionCode 19 / versionName
   1.4.0.
+- The live in-app update was tested from 1.3.9: Settings, Updates found 1.4.0, downloaded it,
+  verified the signed APK, opened Android's installer, and installed versionCode 19 / versionName
+  1.4.0 over the old app.
 - The player tests covered downloaded captions, caption styling, caption copy and share,
   keep-screen behavior, orientation switching, and portrait and landscape PiP bounds.
 - The direct-caption fallback and track selection are covered by unit tests. The fallback's
