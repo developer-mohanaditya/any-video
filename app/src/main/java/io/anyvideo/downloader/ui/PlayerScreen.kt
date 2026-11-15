@@ -42,8 +42,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bedtime
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Fullscreen
@@ -318,13 +316,35 @@ fun FullscreenPlayer(
         Modifier
     }
 
-    val canSwipe = !controlsVisible && !pipMode && (onPrevious != null || onNext != null)
+    // Horizontal paging stays on the player surface. It does not add a tap detector over the
+    // buttons, so Pause, Full screen and Back keep receiving their taps while a swipe anywhere
+    // else moves through the saved media.
+    val swipePaging = if (!pipMode && (onPrevious != null || onNext != null)) {
+        Modifier.pointerInput(media.uri, onPrevious, onNext) {
+            var distance = 0f
+            detectHorizontalDragGestures(
+                onDragStart = { distance = 0f },
+                onDragEnd = {
+                    if (abs(distance) > size.width * 0.12f) {
+                        if (distance < 0) onNext?.invoke() else onPrevious?.invoke()
+                    }
+                },
+                onHorizontalDrag = { change, amount ->
+                    distance += amount
+                    change.consume()
+                },
+            )
+        }
+    } else {
+        Modifier
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .then(revealControls),
+            .then(revealControls)
+            .then(swipePaging),
     ) {
             key(media.uri) {
                 AndroidView(
@@ -439,37 +459,6 @@ fun FullscreenPlayer(
                                     },
                                 )
                             }
-                        }
-                    }
-
-                    if (onPrevious != null) {
-                        IconButton(
-                            onClick = { onPrevious.invoke() },
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .padding(start = 8.dp)
-                                .size(44.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.ChevronLeft,
-                                contentDescription = "Previous video",
-                                tint = Color.White.copy(alpha = 0.82f),
-                            )
-                        }
-                    }
-                    if (onNext != null) {
-                        IconButton(
-                            onClick = { onNext.invoke() },
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .padding(end = 8.dp)
-                                .size(44.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.ChevronRight,
-                                contentDescription = "Next video",
-                                tint = Color.White.copy(alpha = 0.82f),
-                            )
                         }
                     }
 
@@ -607,32 +596,6 @@ fun FullscreenPlayer(
                         }
                     }
                 }
-            }
-
-            if (canSwipe) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .zIndex(0.5f)
-                        .pointerInput(Unit) {
-                            detectTapGestures { controlsVisible = true }
-                        }
-                        .pointerInput(media.uri, onPrevious, onNext) {
-                            var distance = 0f
-                            detectHorizontalDragGestures(
-                                onDragStart = { distance = 0f },
-                                onDragEnd = {
-                                    if (abs(distance) > size.width * 0.12f) {
-                                        if (distance < 0) onNext?.invoke() else onPrevious?.invoke()
-                                    }
-                                },
-                                onHorizontalDrag = { change, amount ->
-                                    distance += amount
-                                    change.consume()
-                                },
-                            )
-                        },
-                )
             }
 
             visibleCue?.let { cue ->
