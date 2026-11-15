@@ -38,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -84,7 +85,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import android.media.MediaMetadataRetriever
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.ImageBitmap
@@ -413,6 +413,8 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f),
             )
             HeaderBrands()
+            Spacer(Modifier.width(5.dp))
+            DownloadStatusButton(downloadTasks) { onNavigate(Screen.DOWNLOADS) }
         }
 
         if (recent.isNotEmpty()) {
@@ -716,8 +718,9 @@ private const val BROWSER_AGENT =
  */
 @Composable
 private fun VideoPoster(url: String, headers: Map<String, String>, modifier: Modifier = Modifier) {
-    val frame by produceState<ImageBitmap?>(initialValue = null, url) {
-        value = withContext(Dispatchers.IO) {
+    var frame by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(url) {
+        frame = withContext(Dispatchers.IO) {
             runCatching {
                 val retriever = MediaMetadataRetriever()
                 try {
@@ -784,6 +787,63 @@ private fun HeaderBrands() {
                 modifier = Modifier.size(18.dp),
                 colorFilter = brandTint(platform),
             )
+        }
+    }
+}
+
+/** The in-app notification bell: active and failed transfers are visible from the homepage. */
+@Composable
+private fun DownloadStatusButton(tasks: List<Downloader.Task>, onClick: () -> Unit) {
+    val active = tasks.count {
+        it.state == Downloader.State.QUEUED ||
+            it.state == Downloader.State.RUNNING ||
+            it.state == Downloader.State.PAUSED
+    }
+    val failed = tasks.count { it.state == Downloader.State.FAILED }
+    val badge = when {
+        failed > 0 -> "!"
+        active > 0 -> if (active > 9) "9+" else active.toString()
+        else -> null
+    }
+    val description = when {
+        active > 0 && failed > 0 -> "Downloads: $active active, $failed failed"
+        active > 0 -> "Downloads: $active active"
+        failed > 0 -> "Downloads: $failed failed"
+        else -> "Downloads"
+    }
+    val tint = when {
+        failed > 0 -> MaterialTheme.colorScheme.error
+        active > 0 -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Box(contentAlignment = Alignment.TopEnd) {
+        IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+            Icon(
+                Icons.Filled.Notifications,
+                contentDescription = description,
+                tint = tint,
+                modifier = Modifier.size(23.dp),
+            )
+        }
+        if (badge != null) {
+            Surface(
+                shape = CircleShape,
+                color = if (failed > 0) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        badge,
+                        color = if (failed > 0) MaterialTheme.colorScheme.onError
+                        else MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
     }
 }
@@ -925,7 +985,7 @@ private fun RecentProfileBubble(profile: RecentProfile, onClick: () -> Unit) {
     }
 }
 
-/** "Best" keeps the compatible H.264 stream; explicit chips expose real 1440/2160. */
+/** "Best" takes the highest supported stream; explicit chips pin one real 1440/2160 height. */
 private fun qualityOptions(heights: List<Int>): List<Pair<String, String>> =
     listOf("max" to "Best") +
         heights.filter { it <= maxDirectHeight() }.map { it.toString() to "${it}p" }
@@ -1166,46 +1226,47 @@ private fun YouTubePickerDialog(
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = captions,
-                            onCheckedChange = { captions = it },
-                            enabled = !checking && captionChoices.isNotEmpty(),
-                        )
-                        Text(
-                            "Download captions if available",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (captionChoices.isEmpty() && !checking) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
                     if (!checking && captionChoices.isEmpty()) {
                         Text(
-                            if (probed) "No captions reported for this video."
-                            else "Could not check captions for this video.",
+                            "Captions not available.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    } else if (captions) {
-                        Text(
-                            "Caption language",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        captionChoices.chunked(2).forEach { rowOptions ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                rowOptions.forEach { track ->
-                                    OptionChip(
-                                        track.label,
-                                        captionLanguage == track.language,
-                                    ) { captionLanguage = track.language }
-                                }
-                            }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = captions,
+                                onCheckedChange = { captions = it },
+                                enabled = !checking && captionChoices.isNotEmpty(),
+                            )
+                            Text(
+                                "Download captions if available",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (captionChoices.isEmpty() && !checking) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                        }
+                        if (captions) {
+                            Text(
+                                "Caption language",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                             Spacer(Modifier.height(6.dp))
+                            captionChoices.chunked(2).forEach { rowOptions ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    rowOptions.forEach { track ->
+                                        OptionChip(
+                                            track.label,
+                                            captionLanguage == track.language,
+                                        ) { captionLanguage = track.language }
+                                    }
+                                }
+                                Spacer(Modifier.height(6.dp))
+                            }
                         }
                     }
                 }

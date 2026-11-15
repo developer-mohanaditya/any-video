@@ -106,7 +106,14 @@ object MediaTrimmer {
                     if (size < 0 || extractor.sampleTime >= endUs) break
                     val time = extractor.sampleTime
                     if (time >= startUs) {
-                        info.set(0, size, time - startUs, extractor.sampleFlags)
+                        // MediaExtractor sample flags are not MediaCodec buffer flags. The muxer
+                        // only needs the key-frame bit; partial-frame flags are not valid here.
+                        val flags = if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+                            MediaCodec.BUFFER_FLAG_KEY_FRAME
+                        } else {
+                            0
+                        }
+                        info.set(0, size, time - startUs, flags)
                         output.writeSampleData(outputTrack.getValue(index), buffer, info)
                     }
                     extractor.advance()

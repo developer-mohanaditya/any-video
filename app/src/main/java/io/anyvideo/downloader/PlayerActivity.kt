@@ -10,6 +10,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
@@ -27,6 +29,9 @@ import io.anyvideo.downloader.ui.FullscreenPlayer
 class PlayerActivity : ComponentActivity() {
 
     private var pipMode by mutableStateOf(false)
+    private var mediaList by mutableStateOf<List<SavedMedia>>(emptyList())
+    private var mediaIndex by mutableIntStateOf(0)
+    private var currentMedia by mutableStateOf<SavedMedia?>(null)
 
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
@@ -52,7 +57,7 @@ class PlayerActivity : ComponentActivity() {
         val kind = runCatching {
             MediaKind.valueOf(intent.getStringExtra(EXTRA_KIND).orEmpty())
         }.getOrDefault(MediaKind.VIDEO)
-        val media = SavedMedia(
+        val initial = SavedMedia(
             uri = uri,
             name = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { "Saved file" },
             kind = kind,
@@ -60,15 +65,42 @@ class PlayerActivity : ComponentActivity() {
             dateAdded = intent.getLongExtra(EXTRA_DATE_ADDED, 0L),
             path = intent.getStringExtra(EXTRA_PATH),
         )
+        // The gallery opens one item, but the player can move through the other saved files of
+        // the same kind with a horizontal swipe. MediaStore is the source of that list.
+        val library = runCatching { Library.load(this, kind) }.getOrDefault(emptyList())
+        mediaList = if (library.any { it.uri == initial.uri }) library else listOf(initial)
+        mediaIndex = mediaList.indexOfFirst { it.uri == initial.uri }.coerceAtLeast(0)
+        currentMedia = mediaList[mediaIndex]
         setContent {
             AnyVideoTheme {
-                FullscreenPlayer(
-                    media = media,
-                    onDismiss = { finish() },
-                    onShare = { share(media) },
-                    onDelete = { delete(media) },
-                    pipMode = pipMode,
-                )
+                val media = currentMedia
+                if (media != null) {
+                    key(media.uri) {
+                        FullscreenPlayer(
+                            media = media,
+                            onDismiss = { finish() },
+                            onShare = { share(media) },
+                            onDelete = { delete(media) },
+                            onPrevious = if (mediaIndex > 0) {
+                                {
+                                    mediaIndex--
+                                    currentMedia = mediaList[mediaIndex]
+                                }
+                            } else {
+                                null
+                            },
+                            onNext = if (mediaIndex < mediaList.lastIndex) {
+                                {
+                                    mediaIndex++
+                                    currentMedia = mediaList[mediaIndex]
+                                }
+                            } else {
+                                null
+                            },
+                            pipMode = pipMode,
+                        )
+                    }
+                }
             }
         }
     }

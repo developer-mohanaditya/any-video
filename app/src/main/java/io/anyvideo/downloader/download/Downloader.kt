@@ -266,7 +266,65 @@ object Downloader {
      */
     private fun isRetryableEmpty(message: String) =
         message == "Empty file" || message == "Empty reply" ||
-            message == "HTTP 404" || message == "HTTP 410"
+            message == "HTTP 404" || message == "HTTP 410" || message == "HTTP 403"
+
+    /**
+     * A direct YouTube stream can expire or be rejected while the rest of the video is still
+     * available. Try the next lower quality once, rather than leaving a 403 on a download whose
+     * explicit quality works. The normal resolver retry below still handles tunnel URLs.
+     */
+    private suspend fun retryDirectLower(
+        context: Context,
+        task: Task,
+        message: String,
+    ): Boolean {
+        if (message != "HTTP 403" && message != "HTTP 410") return false
+        if (task.audioUrl.isNullOrBlank()) return false
+        val source = task.sourceUrl ?: return false
+        if (YouTubeFormats.videoId(source) == null) return false
+        val current = Regex("\\((\\d{3,4})p\\)").find(task.fileName)
+            ?.groupValues?.get(1)?.toIntOrNull() ?: return false
+        for (height in listOf(2160, 1440, 1080, 720, 480, 360)) {
+            if (height >= current) continue
+            val candidate = runCatching {
+                YouTubeFormats.direct(source, height.toString())
+            }.getOrNull() ?: continue
+            if (candidate.url == task.url) continue
+            synchronized(inFlight) {
+                inFlight.remove("${task.relativePath}/${task.fileName}")
+                inFlight.add("${task.relativePath}/${candidate.fileName}")
+            }
+            val retry = task.copy(
+                url = candidate.url,
+                fileName = candidate.fileName,
+                mime = MimeTypes.of(candidate.fileName),
+                audioUrl = candidate.audioUrl,
+                caption = candidate.caption,
+                state = State.RUNNING,
+                received = 0,
+                total = 0,
+                retried = true,
+                error = null,
+            )
+            update(task.id) {
+                it.copy(
+                    url = retry.url,
+                    fileName = retry.fileName,
+                    mime = retry.mime,
+                    audioUrl = retry.audioUrl,
+                    caption = retry.caption,
+                    state = State.RUNNING,
+                    received = 0,
+                    total = 0,
+                    retried = true,
+                    error = null,
+                )
+            }
+            run(context, retry, candidate.headers, viaProxy = false)
+            return true
+        }
+        return false
+    }
 
     private suspend fun run(
         context: Context,
@@ -325,6 +383,7 @@ object Downloader {
                 update(task.id) { it.copy(state = State.FAILED, error = "Cancelled") }
                 return
             }
+            if (!viaProxy && !task.retried && retryDirectLower(context, task, message)) return
             val proxy = Prefs.fallbackProxy.trim()
             // A failed CDN request gets one retry through the configured proxy, without the
             // session headers, because a proxy is a third party.
@@ -657,7 +716,15 @@ object Downloader {
         while (true) {
             val size = extractor.readSampleData(buffer, 0)
             if (size < 0) break
-            info.set(0, size, extractor.sampleTime, extractor.sampleFlags)
+            // MediaExtractor sample flags are not MediaCodec buffer flags. The muxer only
+            // needs the key-frame bit; passing SAMPLE_FLAG_PARTIAL_FRAME through would look
+            // like END_OF_STREAM to MediaMuxer.
+            val flags = if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+                MediaCodec.BUFFER_FLAG_KEY_FRAME
+            } else {
+                0
+            }
+            info.set(0, size, extractor.sampleTime, flags)
             muxer.writeSampleData(outTrack, buffer, info)
             extractor.advance()
         }

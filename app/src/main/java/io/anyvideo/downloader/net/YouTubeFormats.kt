@@ -257,49 +257,61 @@ object YouTubeFormats {
         val streaming = root.optJSONObject("streamingData") ?: return null
         val id = videoId(pageUrl) ?: return null
         val requested = quality.trim().toIntOrNull()
-        // "Best" keeps the broadly compatible H.264 stream. An explicit height picks the codec
-        // YouTube actually uses at that height: H.264 through 1080, VP9 at 1440/2160, and AV1
-        // at 2160 where the platform can mux it.
-        val target = (requested ?: 1080).coerceIn(144, MAX_HEIGHT)
+        // "Best" means the highest stream this device can actually play, not a fixed 1080p
+        // compatibility cap. An explicit height still uses the codec YouTube publishes there:
+        // H.264 through 1080, VP9 at 1440/2160, and AV1 at 2160 where the platform can mux it.
         val videos = objects(streaming.optJSONArray("adaptiveFormats"))
-        val video = if (target <= 1080) {
-            val h264 = videos.filter {
-                val mime = it.optString("mimeType")
-                mime.startsWith("video/mp4") &&
-                    mime.contains("avc1") &&
-                    it.optInt("height", 0) >= 144 &&
-                    it.optString("url").isNotBlank()
+            .filter {
+                it.optInt("height", 0) >= 144 && it.optString("url").isNotBlank()
             }
-            h264.filter { it.optInt("height", 0) <= target }
-                .maxByOrNull { it.optInt("height", 0) }
+        if (videos.isEmpty()) return null
+        val best = requested == null
+        val target = if (best) {
+            videos.maxOf { it.optInt("height", 0).coerceAtMost(MAX_HEIGHT) }
         } else {
-            // AV1 is the best fit for Android 14+: the stream is already in MP4 and carries
-            // the codec configuration the muxer needs. VP9 is the fallback for older releases.
+            requested!!.coerceIn(144, MAX_HEIGHT)
+        }
+
+        fun streamAt(height: Int): JSONObject? {
+            val atHeight = videos.filter { it.optInt("height", 0) == height }
+            val h264 = atHeight.filter {
+                val mime = it.optString("mimeType")
+                mime.startsWith("video/mp4") && mime.contains("avc1")
+            }.maxByOrNull { it.optLong("bitrate", 0L) }
             val av1 = if (allowAv1) {
-                videos.filter {
+                atHeight.filter {
                     val mime = it.optString("mimeType")
-                    mime.startsWith("video/mp4") &&
-                        mime.contains("av01") &&
-                        it.optInt("height", 0) == target &&
-                        it.optString("url").isNotBlank()
+                    mime.startsWith("video/mp4") && mime.contains("av01")
                 }.maxByOrNull { it.optLong("bitrate", 0L) }
             } else {
                 null
             }
             val vp9 = if (allowVp9) {
-                videos.filter {
+                atHeight.filter {
                     it.optString("mimeType").startsWith("video/webm") &&
-                        it.optString("mimeType").contains("vp9") &&
-                        it.optInt("height", 0) == target &&
-                        it.optString("url").isNotBlank()
+                        it.optString("mimeType").contains("vp9")
                 }.minByOrNull { if (it.optString("mimeType").contains("vp9.2")) 1 else 0 }
             } else {
                 null
             }
-            av1 ?: vp9
-        } ?: return null
+            return if (height <= 1080) h264 ?: av1 ?: vp9 else av1 ?: vp9 ?: h264
+        }
+
+        var video: JSONObject? = null
+        if (best) {
+            val heights = videos.map { it.optInt("height", 0).coerceAtMost(MAX_HEIGHT) }
+                .distinct()
+                .sortedDescending()
+            for (height in heights) {
+                video = streamAt(height)
+                if (video != null) break
+            }
+        } else {
+            video = streamAt(target)
+        }
+        if (video == null) return null
         // A 720 choice must not quietly become a 360 file. Let the resolver try instead.
-        if (video.optInt("height", 0) < target) return null
+        if (!best && video.optInt("height", 0) < target) return null
         // VP9 WebM uses Opus, while H.264/AV1 MP4 uses AAC. Muxing VP9 into MP4 is rejected by
         // Android's writer, so the container follows the codec.
         val webm = video.optString("mimeType").startsWith("video/webm")

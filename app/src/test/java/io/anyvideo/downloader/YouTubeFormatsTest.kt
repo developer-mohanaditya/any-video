@@ -205,6 +205,35 @@ class YouTubeFormatsTest {
     }
 
     @Test
+    fun `best quality chooses the highest available 4k stream`() {
+        val candidate = YouTubeFormats.parseDirect(
+            direct4kBody,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "max",
+            allowAv1 = false,
+        )!!
+
+        assertEquals("https://video-2160-vp9", candidate.url)
+        assertEquals("https://audio-opus", candidate.audioUrl)
+        assertEquals("4K test [dQw4w9WgXcQ] (2160p).webm", candidate.fileName)
+    }
+
+    @Test
+    fun `best quality falls back to 1080 when the device cannot play vp9`() {
+        val candidate = YouTubeFormats.parseDirect(
+            direct4kBody,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "max",
+            allowAv1 = false,
+            allowVp9 = false,
+        )!!
+
+        assertEquals("https://video-1080", candidate.url)
+        assertEquals("https://audio", candidate.audioUrl)
+        assertEquals("4K test [dQw4w9WgXcQ] (1080p).mp4", candidate.fileName)
+    }
+
+    @Test
     fun `a stale 8k choice is capped to 4k`() {
         val candidate = YouTubeFormats.parseDirect(
             direct4kBody,
@@ -316,7 +345,7 @@ class YouTubeFormatsTest {
     }
 
     @Test
-    fun `direct path declines when every stream is above the 1080 cap`() {
+    fun `best keeps a 4k h264 stream when it is the highest available`() {
         val only4k = """
             {
               "playabilityStatus": {"status": "OK"},
@@ -329,13 +358,15 @@ class YouTubeFormatsTest {
             }
         """.trimIndent()
 
-        assertNull(
-            YouTubeFormats.parseDirect(
-                only4k,
-                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-                "max",
-            ),
-        )
+        val candidate = YouTubeFormats.parseDirect(
+            only4k,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "max",
+        )!!
+
+        assertEquals("https://video-2160", candidate.url)
+        assertEquals("https://audio", candidate.audioUrl)
+        assertEquals("YouTube [dQw4w9WgXcQ] (2160p).mp4", candidate.fileName)
     }
 
     @Test

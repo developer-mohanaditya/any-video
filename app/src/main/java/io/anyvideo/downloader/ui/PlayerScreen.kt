@@ -42,8 +42,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
@@ -77,6 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -91,6 +96,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import io.anyvideo.downloader.data.CaptionCue
 import io.anyvideo.downloader.data.CaptionFile
 import io.anyvideo.downloader.data.CaptionParser
@@ -101,6 +109,7 @@ import io.anyvideo.downloader.util.Prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 private val PlaybackSpeeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 private val SleepChoices = listOf(0, 15, 30, 60)
@@ -110,9 +119,9 @@ private val CaptionSizes: List<Pair<String, TextUnit>> = listOf(
     "Large" to 18.sp,
 )
 private val CaptionBackgrounds: List<Pair<String, Float>> = listOf(
-    "Light" to 0.35f,
-    "Medium" to 0.72f,
-    "Strong" to 0.9f,
+    "Light" to 0.22f,
+    "Medium" to 0.42f,
+    "Strong" to 0.62f,
 )
 private val CaptionPositions = listOf("Low", "Normal", "High")
 private val OrientationChoices = listOf(
@@ -139,6 +148,8 @@ fun FullscreenPlayer(
     onDismiss: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
+    onPrevious: (() -> Unit)? = null,
+    onNext: (() -> Unit)? = null,
     pipMode: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -168,6 +179,7 @@ fun FullscreenPlayer(
         )
     }
     var orientation by remember { mutableStateOf(Prefs.playerOrientation) }
+    var fullscreen by remember { mutableStateOf(false) }
     var videoWidth by remember { mutableIntStateOf(0) }
     var videoHeight by remember { mutableIntStateOf(0) }
     var captionActionCue by remember { mutableStateOf<CaptionCue?>(null) }
@@ -218,7 +230,20 @@ fun FullscreenPlayer(
     fun chooseOrientation(value: String) {
         orientation = value
         Prefs.playerOrientation = value
-        applyVideoOrientation(context, value, videoWidth, videoHeight)
+        fullscreen = false
+    }
+
+    LaunchedEffect(orientation, fullscreen) {
+        val activity = context.findActivity() ?: return@LaunchedEffect
+        applyVideoOrientation(context, orientation, fullscreen)
+        val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        if (fullscreen) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     LaunchedEffect(playing, controlsVisible, pipMode, captionMenuOpen, moreOpen) {
@@ -256,8 +281,12 @@ fun FullscreenPlayer(
         onDispose {
             runCatching { videoView?.stopPlayback() }
             runCatching { player?.release() }
-            runCatching {
-                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            if (activity != null) {
+                runCatching {
+                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                        .show(WindowInsetsCompat.Type.systemBars())
+                }
             }
         }
     }
@@ -271,18 +300,31 @@ fun FullscreenPlayer(
     }
 
     BackHandler(onBack = onDismiss)
-    val visibleCue = if (captionsOn && !audioOnly) {
+    val visibleCue = if (captionsOn && !audioOnly && !controlsVisible) {
         CaptionParser.currentCue(captionCues, position)
     } else {
         null
     }
     val latestCue = rememberUpdatedState(visibleCue)
 
+    // Do not keep a tap detector on the whole player while the controls are up. It competes
+    // with Pause, Full screen and the other buttons and was the reason taps sometimes only hid
+    // the controls. A hidden player still needs one tap anywhere to bring them back.
+    val revealControls = if (!controlsVisible && !pipMode) {
+        Modifier.pointerInput(Unit) {
+            detectTapGestures { controlsVisible = true }
+        }
+    } else {
+        Modifier
+    }
+
+    val canSwipe = !controlsVisible && !pipMode && (onPrevious != null || onNext != null)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) { detectTapGestures { controlsVisible = !controlsVisible } },
+            .then(revealControls),
     ) {
             key(media.uri) {
                 AndroidView(
@@ -294,14 +336,6 @@ fun FullscreenPlayer(
                                 duration = preparedPlayer.duration.toLong()
                                 videoWidth = preparedPlayer.videoWidth
                                 videoHeight = preparedPlayer.videoHeight
-                                if (media.kind != io.anyvideo.downloader.data.MediaKind.AUDIO) {
-                                    applyVideoOrientation(
-                                        context,
-                                        orientation,
-                                        preparedPlayer.videoWidth,
-                                        preparedPlayer.videoHeight,
-                                    )
-                                }
                                 runCatching {
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                                         preparedPlayer.playbackParams = PlaybackParams().setSpeed(speed)
@@ -335,6 +369,7 @@ fun FullscreenPlayer(
                 visible = controlsVisible && !pipMode,
                 enter = fadeIn(),
                 exit = fadeOut(),
+                modifier = Modifier.zIndex(2f),
             ) {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.38f))) {
                     Row(
@@ -360,6 +395,13 @@ fun FullscreenPlayer(
                         Box(modifier = Modifier.weight(1f))
                         IconButton(onClick = onShare) {
                             Icon(Icons.Filled.Share, contentDescription = "Share", tint = Color.White)
+                        }
+                        IconButton(onClick = { fullscreen = !fullscreen }) {
+                            Icon(
+                                if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                                contentDescription = if (fullscreen) "Exit full screen" else "Full screen",
+                                tint = Color.White,
+                            )
                         }
                         Box {
                             IconButton(onClick = { moreOpen = true }) {
@@ -397,6 +439,37 @@ fun FullscreenPlayer(
                                     },
                                 )
                             }
+                        }
+                    }
+
+                    if (onPrevious != null) {
+                        IconButton(
+                            onClick = { onPrevious.invoke() },
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .padding(start = 8.dp)
+                                .size(44.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.ChevronLeft,
+                                contentDescription = "Previous video",
+                                tint = Color.White.copy(alpha = 0.82f),
+                            )
+                        }
+                    }
+                    if (onNext != null) {
+                        IconButton(
+                            onClick = { onNext.invoke() },
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 8.dp)
+                                .size(44.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.ChevronRight,
+                                contentDescription = "Next video",
+                                tint = Color.White.copy(alpha = 0.82f),
+                            )
                         }
                     }
 
@@ -536,14 +609,37 @@ fun FullscreenPlayer(
                 }
             }
 
+            if (canSwipe) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(0.5f)
+                        .pointerInput(Unit) {
+                            detectTapGestures { controlsVisible = true }
+                        }
+                        .pointerInput(media.uri, onPrevious, onNext) {
+                            var distance = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { distance = 0f },
+                                onDragEnd = {
+                                    if (abs(distance) > size.width * 0.12f) {
+                                        if (distance < 0) onNext?.invoke() else onPrevious?.invoke()
+                                    }
+                                },
+                                onHorizontalDrag = { change, amount ->
+                                    distance += amount
+                                    change.consume()
+                                },
+                            )
+                        },
+                )
+            }
+
             visibleCue?.let { cue ->
+                // The caption sits above the video but below the controls, so it never takes
+                // Pause, Back or Full screen taps while the controls are visible.
                 val bottom = when {
                     pipMode -> 10.dp
-                    controlsVisible -> when (captionStyle.position) {
-                        0 -> 176.dp
-                        1 -> 188.dp
-                        else -> 212.dp
-                    }
                     else -> when (captionStyle.position) {
                         0 -> 16.dp
                         1 -> 30.dp
@@ -553,9 +649,11 @@ fun FullscreenPlayer(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .fillMaxWidth(if (pipMode) 0.94f else 0.88f)
+                        .zIndex(1f)
+                        .fillMaxWidth(if (pipMode) 0.94f else 0.9f)
                         .navigationBarsPadding()
                         .padding(start = 12.dp, end = 12.dp, bottom = bottom),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         cue.text,
@@ -566,10 +664,9 @@ fun FullscreenPlayer(
                         maxLines = if (pipMode) 2 else captionStyle.lines,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
-                            .fillMaxWidth()
                             .pointerInput(pipMode) {
                                 detectTapGestures(
-                                    onTap = { controlsVisible = !controlsVisible },
+                                    onTap = { controlsVisible = true },
                                     onLongPress = {
                                         if (!pipMode) {
                                             captionActionCue = latestCue.value
@@ -579,12 +676,12 @@ fun FullscreenPlayer(
                             }
                             .background(
                                 Color.Black.copy(
-                                    alpha = if (pipMode) 0.62f
+                                    alpha = if (pipMode) 0.55f
                                     else CaptionBackgrounds[captionStyle.background].second,
                                 ),
-                                RoundedCornerShape(7.dp),
+                                RoundedCornerShape(10.dp),
                             )
-                            .padding(horizontal = 11.dp, vertical = 6.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                     )
                 }
             }
@@ -793,18 +890,16 @@ private fun SlimSeekBar(
 private fun applyVideoOrientation(
     context: Context,
     mode: String,
-    width: Int,
-    height: Int,
+    fullscreen: Boolean,
 ) {
     val activity = context.findActivity() ?: return
-    val target = when (mode) {
-        "portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-        "landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        else -> {
-            if (width <= 0 || height <= 0) return
-            if (width > height) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-        }
+    val target = when {
+        // Auto follows the phone, not the video. A horizontal clip therefore keeps the current
+        // orientation until the user asks for full screen.
+        fullscreen -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        mode == "portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        mode == "landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
     if (activity.requestedOrientation != target) activity.requestedOrientation = target
 }

@@ -1,6 +1,7 @@
 package io.anyvideo.downloader
 
 import android.Manifest
+import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -33,14 +34,18 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import io.anyvideo.downloader.ui.BrowserScreen
 import io.anyvideo.downloader.ui.BulkScreen
 import io.anyvideo.downloader.ui.CaptionScreen
@@ -162,6 +167,23 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Composable
+private fun SystemBarAppearance(darkTheme: Boolean) {
+    val view = LocalView.current
+    val background = MaterialTheme.colorScheme.background
+    SideEffect {
+        val window = (view.context as? Activity)?.window ?: return@SideEffect
+        // Android 15 draws edge to edge and ignores the bar colours, so the icon appearance
+        // has to follow the app theme or white icons disappear on the Light background.
+        window.statusBarColor = background.toArgb()
+        window.navigationBarColor = background.toArgb()
+        WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !darkTheme
+            isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
+}
+
 private data class Tab(val screen: Screen, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
@@ -204,6 +226,7 @@ private fun AppRoot(
         else -> isSystemInDarkTheme()
     }
     AnyVideoTheme(darkTheme = darkTheme) {
+        SystemBarAppearance(darkTheme)
         Box(modifier = Modifier.fillMaxSize()) {
             AppRootContent(
                 incomingUrl = incomingUrl,
