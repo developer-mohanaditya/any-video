@@ -12,6 +12,9 @@ import android.media.MediaPlayer
 import android.media.PlaybackParams
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Rational
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -76,7 +79,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -109,9 +111,7 @@ import io.anyvideo.downloader.data.MimeTypes
 import io.anyvideo.downloader.data.SavedMedia
 import io.anyvideo.downloader.util.Prefs
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
@@ -191,8 +191,9 @@ fun FullscreenPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var moreOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    val pauseTapScope = rememberCoroutineScope()
-    var pendingPauseTap by remember { mutableStateOf<Job?>(null) }
+    val playbackHandler = remember { Handler(Looper.getMainLooper()) }
+    var lastPlaybackToggleAt by remember { mutableLongStateOf(0L) }
+    var lastCenterTapAt by remember { mutableLongStateOf(0L) }
     val currentControlsVisible = rememberUpdatedState(controlsVisible)
     val currentPlaying = rememberUpdatedState(playing)
     val currentPosition = rememberUpdatedState(position)
@@ -286,6 +287,10 @@ fun FullscreenPlayer(
         }
     }
 
+    DisposableEffect(playbackHandler) {
+        onDispose { playbackHandler.removeCallbacksAndMessages(null) }
+    }
+
     DisposableEffect(media.uri) {
         val activity = context.findActivity()
         onDispose {
@@ -318,15 +323,35 @@ fun FullscreenPlayer(
     val latestCue = rememberUpdatedState(visibleCue)
 
     fun seekBy(deltaMs: Long) {
-        val target = (currentPosition.value + deltaMs)
-            .coerceIn(0L, currentDuration.value.coerceAtLeast(0L))
+        val view = videoView
+        val from = view?.let { runCatching { it.currentPosition.toLong() }.getOrNull() }
+            ?: currentPosition.value
+        val durationMs = currentDuration.value.takeIf { it > 0L }
+            ?: view?.let { runCatching { it.duration.toLong() }.getOrNull() }
+            ?: 0L
+        val target = (from + deltaMs).coerceIn(0L, durationMs.coerceAtLeast(0L))
         position = target
-        videoView?.seekTo(target.toInt())
+        view?.seekTo(target.toInt())
     }
 
-    fun togglePlayback() {
-        if (currentPlaying.value) videoView?.pause() else videoView?.start()
-        playing = !currentPlaying.value
+    fun togglePlaybackOnce() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastPlaybackToggleAt < 400L) return
+        lastPlaybackToggleAt = now
+        val view = videoView ?: return
+        val isPlaying = runCatching { view.isPlaying }.getOrDefault(currentPlaying.value)
+        if (isPlaying) view.pause() else view.start()
+        playing = !isPlaying
+    }
+
+    fun schedulePlaybackToggle() {
+        playbackHandler.removeCallbacksAndMessages(null)
+        playbackHandler.postDelayed({ togglePlaybackOnce() }, 300L)
+    }
+
+    fun commitPlaybackToggle() {
+        playbackHandler.removeCallbacksAndMessages(null)
+        togglePlaybackOnce()
     }
 
     fun handleDoubleTap(x: Float, width: Float) {
@@ -334,7 +359,7 @@ fun FullscreenPlayer(
         when {
             x < width * 0.35f -> seekBy(-10_000L)
             x > width * 0.65f -> seekBy(10_000L)
-            else -> togglePlayback()
+            else -> commitPlaybackToggle()
         }
     }
 
@@ -375,7 +400,7 @@ fun FullscreenPlayer(
                                             abs(screenX - metrics.widthPixels / 2f) <= centerSlop &&
                                             abs(screenY - metrics.heightPixels / 2f) <= centerSlop
                                         if (centerTap) {
-                                            togglePlayback()
+                                            schedulePlaybackToggle()
                                         } else {
                                             controlsVisible = !controlsVisible
                                         }
@@ -533,17 +558,13 @@ fun FullscreenPlayer(
                     ) {
                         IconButton(
                             onClick = {
-                                val pending = pendingPauseTap
-                                if (pending != null) {
-                                    pending.cancel()
-                                    pendingPauseTap = null
-                                    togglePlayback()
+                                val now = SystemClock.elapsedRealtime()
+                                if (now - lastCenterTapAt < 300L) {
+                                    lastCenterTapAt = 0L
+                                    commitPlaybackToggle()
                                 } else {
-                                    pendingPauseTap = pauseTapScope.launch {
-                                        delay(300)
-                                        pendingPauseTap = null
-                                        togglePlayback()
-                                    }
+                                    lastCenterTapAt = now
+                                    schedulePlaybackToggle()
                                 }
                             },
                             modifier = Modifier.size(62.dp),
