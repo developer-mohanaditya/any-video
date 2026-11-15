@@ -13,6 +13,8 @@ import android.media.PlaybackParams
 import android.net.Uri
 import android.os.Build
 import android.util.Rational
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Toast
 import android.widget.VideoView
@@ -305,35 +307,11 @@ fun FullscreenPlayer(
     }
     val latestCue = rememberUpdatedState(visibleCue)
 
-    // Do not keep a tap detector on the whole player while the controls are up. It competes
-    // with Pause, Full screen and the other buttons and was the reason taps sometimes only hid
-    // the controls. A hidden player still needs one tap anywhere to bring them back.
-    val revealControls = if (!controlsVisible && !pipMode) {
-        Modifier.pointerInput(Unit) {
-            detectTapGestures { controlsVisible = true }
-        }
-    } else {
-        Modifier
-    }
-
-    // Horizontal paging stays on the player surface. It does not add a tap detector over the
-    // buttons, so Pause, Full screen and Back keep receiving their taps while a swipe anywhere
-    // else moves through the saved media.
-    val swipePaging = if (!pipMode && (onPrevious != null || onNext != null)) {
-        Modifier.pointerInput(media.uri, onPrevious, onNext) {
-            var distance = 0f
-            detectHorizontalDragGestures(
-                onDragStart = { distance = 0f },
-                onDragEnd = {
-                    if (abs(distance) > size.width * 0.12f) {
-                        if (distance < 0) onNext?.invoke() else onPrevious?.invoke()
-                    }
-                },
-                onHorizontalDrag = { change, amount ->
-                    distance += amount
-                    change.consume()
-                },
-            )
+    // The video view handles taps on the picture itself. This catches taps on the letterboxed
+    // area around it so the whole player surface behaves like a toggle.
+    val letterboxTaps = if (!pipMode) {
+        Modifier.pointerInput(controlsVisible) {
+            detectTapGestures { controlsVisible = !controlsVisible }
         }
     } else {
         Modifier
@@ -343,13 +321,35 @@ fun FullscreenPlayer(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .then(revealControls)
-            .then(swipePaging),
+            .then(letterboxTaps),
     ) {
             key(media.uri) {
                 AndroidView(
                     factory = { viewContext ->
                         VideoView(viewContext).apply {
+                            var downX = 0f
+                            var dragging = false
+                            val touchSlop = ViewConfiguration.get(viewContext).scaledTouchSlop
+                            setOnTouchListener { view, event ->
+                                when (event.actionMasked) {
+                                    MotionEvent.ACTION_DOWN -> {
+                                        downX = event.x
+                                        dragging = false
+                                    }
+                                    MotionEvent.ACTION_MOVE -> {
+                                        if (abs(event.x - downX) > touchSlop) dragging = true
+                                    }
+                                    MotionEvent.ACTION_UP -> {
+                                        val dx = event.x - downX
+                                        if (!dragging) {
+                                            controlsVisible = !controlsVisible
+                                        } else if (abs(dx) > view.width * 0.12f) {
+                                            if (dx < 0) onNext?.invoke() else onPrevious?.invoke()
+                                        }
+                                    }
+                                }
+                                true
+                            }
                             setOnPreparedListener { preparedPlayer ->
                                 player = preparedPlayer
                                 prepared = true
