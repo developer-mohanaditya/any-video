@@ -38,6 +38,16 @@ object Prefs {
         get() = sp.getBoolean("notifications", true)
         set(value) = sp.edit().putBoolean("notifications", value).apply()
 
+    /** Last successful update check, used to keep the launch check to once a day. */
+    var lastUpdateCheck: Long
+        get() = sp.getLong("last_update_check", 0L)
+        set(value) = sp.edit().putLong("last_update_check", value).apply()
+
+    /** The release the user chose to postpone, so the same prompt does not return on every launch. */
+    var dismissedUpdateVersion: String
+        get() = sp.getString("dismissed_update_version", "") ?: ""
+        set(value) = sp.edit().putString("dismissed_update_version", value).apply()
+
     /**
      * FastSave behaviour: opening the app with a supported link on the clipboard resolves it and
      * enqueues the files straight away, instead of stopping at the catalogue for a Save tap.

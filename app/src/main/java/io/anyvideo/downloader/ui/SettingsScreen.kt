@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -372,9 +373,9 @@ fun SettingsScreen(
             SurfaceCard {
                 Text("Updates", fontWeight = FontWeight.SemiBold)
                 Text(
-                                            "AnyVideo ${BuildConfig.VERSION_NAME}. Updates come from this project's GitHub " +
-                            "releases. The app opens the APK download; your browser saves it and Android " +
-                            "installs it, so the app never asks for permission to install packages.",
+                    "AnyVideo ${BuildConfig.VERSION_NAME}. Updates come from this project's GitHub " +
+                        "releases. AnyVideo downloads the signed APK itself, then Android asks you to " +
+                        "confirm the install. Allow installs from AnyVideo once when Android asks.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -387,6 +388,16 @@ fun SettingsScreen(
                         is Updates.State.UpToDate -> "You are on the newest version."
                         is Updates.State.Available ->
                             "Version ${update.release.name} is available to download."
+                        is Updates.State.Downloading ->
+                            if (update.total > 0) {
+                                "Downloading ${formatBytes(update.received)} of " +
+                                    formatBytes(update.total)
+                            } else {
+                                "Downloading ${formatBytes(update.received)}"
+                            }
+                        is Updates.State.Ready ->
+                            "Version ${update.release.name} is downloaded. Android asks you to " +
+                                "confirm the install."
                         is Updates.State.Failed -> update.message
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -415,23 +426,52 @@ fun SettingsScreen(
                             )
                         }
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = { Updates.open(context, update.release) }) {
+                        Button(onClick = { Updates.startDownload(context, update.release) }) {
                             Text("Download update")
                         }
+                    }
+                    is Updates.State.Downloading -> {
+                        Spacer(Modifier.height(8.dp))
+                        if (update.total > 0) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    (update.received.toFloat() / update.total).coerceIn(0f, 1f)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    is Updates.State.Ready -> {
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = {
+                            if (!Updates.install(context, update.file)) {
+                                Toast.makeText(
+                                    context,
+                                    "Allow installs from AnyVideo, then tap Install update",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }) { Text("Install update") }
+                    }
+                    is Updates.State.Failed -> {
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = {
+                            if (update.release != null) {
+                                Updates.startDownload(context, update.release)
+                            } else {
+                                Updates.startCheck(context)
+                            }
+                        }) { Text("Try again") }
                     }
                     else -> {
                         Spacer(Modifier.height(8.dp))
                         Button(
                             enabled = update !is Updates.State.Checking,
-                            onClick = { scope.launch { Updates.check() } },
+                            onClick = { Updates.startCheck(context) },
                         ) {
-                            Text(
-                                when {
-                                    update is Updates.State.Checking -> "Checking…"
-                                    update is Updates.State.Failed -> "Try again"
-                                    else -> "Check for updates"
-                                },
-                            )
+                            Text(if (update is Updates.State.Checking) "Checking…" else "Check for updates")
                         }
                     }
                 }

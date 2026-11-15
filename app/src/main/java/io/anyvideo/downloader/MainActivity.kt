@@ -57,6 +57,8 @@ import io.anyvideo.downloader.ui.WhatsAppScreen
 import io.anyvideo.downloader.net.IgSession
 import io.anyvideo.downloader.download.Downloader
 import io.anyvideo.downloader.ui.AnyVideoTheme
+import io.anyvideo.downloader.ui.AutoUpdateCheck
+import io.anyvideo.downloader.ui.UpdatePrompt
 import io.anyvideo.downloader.util.Prefs
 import io.anyvideo.downloader.ui.tools.DpMakerScreen
 import io.anyvideo.downloader.ui.tools.GridMakerScreen
@@ -211,6 +213,8 @@ private fun AppRoot(
             ) {
                 SplashScreen()
             }
+            AutoUpdateCheck()
+            UpdatePrompt()
         }
     }
 }

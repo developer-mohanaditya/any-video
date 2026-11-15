@@ -1,6 +1,6 @@
 # AnyVideo 1.3.8
 
-`AnyVideo-1.3.8.apk`, versionCode 17, 1,756,258 bytes, Android 11 or newer. Signed with the same
+`AnyVideo-1.3.8.apk`, versionCode 17, 1,772,698 bytes, Android 11 or newer. Signed with the same
 project key as 1.3.7, so it installs over it and keeps your settings and downloads.
 
 ## Player
@@ -23,6 +23,17 @@ project key as 1.3.7, so it installs over it and keeps your settings and downloa
 - Pausing suspends the transfer between chunks; Resume continues from the saved progress.
 - Completed files offer Play and Share. Failed files show the reason and Retry.
 - The download notification uses the app tile as its large icon and a monochrome status icon.
+
+## Updates
+
+- AnyVideo checks the latest GitHub release once a day at launch and from Settings.
+- A newer release, or a same-version APK whose checksum differs from the installed one, appears
+  in an update prompt. The same-version check lets a 1.3.8 repair reach people already on 1.3.8.
+- The APK downloads inside AnyVideo with progress instead of opening GitHub in a browser. The app
+  verifies its size, GitHub SHA-256 digest, package name and project signing certificate before
+  offering Install update.
+- Android asks for permission to install updates from AnyVideo once, then shows its normal install
+  confirmation. The app cannot install silently.
 
 ## Clip video
 
@@ -56,6 +67,8 @@ project key as 1.3.7, so it installs over it and keeps your settings and downloa
 - `:app:testDebugUnitTest` and `:app:assembleRelease` pass.
 - The signed 1.3.8 APK installs over 1.3.7 on the API 35 emulator, and the release build opens
   Tools with Clip video and Ringtone maker.
+- Updates: launch-time prompt, in-app download progress, checksum and signature checks, and the
+  Android install confirmation were exercised on the API 35 emulator.
 - No app crash appeared in logcat during the release smoke test.
 
 ## Known limits
@@ -65,5 +78,6 @@ project key as 1.3.7, so it installs over it and keeps your settings and downloa
 - Clip and Ringtone work on files already visible to Android's picker. They do not fetch links.
 - Share, delete and the external player action use Android's normal handlers; the release smoke
   test did not exercise those three actions.
+- Android still requires the user to allow installs from AnyVideo and to confirm each install.
 
-SHA-256: 4c3ff2008a53dc598d260f415dacd587d04db4d9495a7fad7f51c09df34b0da3
+SHA-256: bd70ad492cb3b187210206a7a4b3cab9a7a196c1221b2b1ca8dd9abea3d2284e

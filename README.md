@@ -26,9 +26,11 @@ over this one and keep your settings and downloads. Android will ask once for pe
 install from your browser or file manager, and Play Protect may ask you to confirm because the
 app does not come from the Play Store.
 
-After the first install, Settings, Updates, Check for updates opens the APK download directly. The
-browser downloads the new APK and Android installs it; the app itself does not request permission
-to install packages.
+After the first install, Settings, Updates, Check for updates checks GitHub. AnyVideo also checks
+once a day when it starts and offers a new release in a prompt. The signed APK downloads inside
+the app, is checked against GitHub's checksum and the project signing key, and then opens Android's
+installer. Android asks you to allow installs from AnyVideo once and asks you to confirm each
+install; the app cannot install silently.
 
 ## What it is
 
@@ -130,9 +132,10 @@ the volume low and use an account you can afford to lose.
 ## Settings worth knowing
 
 - **Appearance**: Auto follows the phone, or pin Light or Dark. The choice applies to every screen.
-- **Updates**: checks this project's GitHub releases and shows the notes and APK size. The button
-  opens the APK download in your browser, which hands it to Android's normal installer. Keeping
-  install permission out of the app avoids Play Protect's self-updater warning.
+- **Updates**: checks this project's GitHub releases at launch and from Settings, and shows the
+  notes and APK size. The signed APK downloads inside the app and Android's normal installer asks
+  for confirmation. Android also asks once for permission to install updates from AnyVideo.
+  Dismissing the prompt leaves the update available in Settings.
 
 - **Resolver**: base URL and key for a cobalt compatible instance. **Test** calls `GET /` and
   reports the version and the number of services. No instance ships with this source, so set one
@@ -177,6 +180,8 @@ is why it asks for `MANAGE_EXTERNAL_STORAGE` on Android 11 and newer.
 - Some newer Instagram reels come back from the resolver as their cover image. The app refuses to
   save that still and asks you to sign in to Instagram, which then fetches the video.
 - The app is distributed as an APK because `MANAGE_EXTERNAL_STORAGE` is restricted on Google Play.
+- Android does not allow silent self-installs. The app downloads and verifies the APK, but Android
+  still asks you to allow installs from AnyVideo and to confirm the replacement.
 - Subtitles are not rendered yet. The subtitle control reports when a file has no subtitle track.
 
 ## Project policy
