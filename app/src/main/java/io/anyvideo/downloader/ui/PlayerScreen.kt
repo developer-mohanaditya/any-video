@@ -27,6 +27,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -90,6 +91,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -560,6 +566,21 @@ fun FullscreenPlayer(
                             }
                         }
                                         }
+
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(62.dp)
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = if (playing) "Pause" else "Play"
+                                onClick(label = if (playing) "Pause" else "Play") {
+                                    togglePlayback()
+                                    true
+                                }
+                            }
+                            .focusable(),
+                    )
 
                     Column(
                         modifier = Modifier
