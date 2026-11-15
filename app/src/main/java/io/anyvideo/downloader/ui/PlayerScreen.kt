@@ -12,9 +12,6 @@ import android.media.MediaPlayer
 import android.media.PlaybackParams
 import android.net.Uri
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.os.SystemClock
 import android.util.Rational
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -55,9 +52,7 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Subtitles
@@ -84,10 +79,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.zIndex
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -100,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -191,9 +190,6 @@ fun FullscreenPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var moreOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    val playbackHandler = remember { Handler(Looper.getMainLooper()) }
-    var lastPlaybackToggleAt by remember { mutableLongStateOf(0L) }
-    var lastCenterTapAt by remember { mutableLongStateOf(0L) }
     val currentControlsVisible = rememberUpdatedState(controlsVisible)
     val currentPlaying = rememberUpdatedState(playing)
     val currentPosition = rememberUpdatedState(position)
@@ -287,10 +283,6 @@ fun FullscreenPlayer(
         }
     }
 
-    DisposableEffect(playbackHandler) {
-        onDispose { playbackHandler.removeCallbacksAndMessages(null) }
-    }
-
     DisposableEffect(media.uri) {
         val activity = context.findActivity()
         onDispose {
@@ -334,24 +326,11 @@ fun FullscreenPlayer(
         view?.seekTo(target.toInt())
     }
 
-    fun togglePlaybackOnce() {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastPlaybackToggleAt < 400L) return
-        lastPlaybackToggleAt = now
+    fun togglePlayback() {
         val view = videoView ?: return
         val isPlaying = runCatching { view.isPlaying }.getOrDefault(currentPlaying.value)
         if (isPlaying) view.pause() else view.start()
         playing = !isPlaying
-    }
-
-    fun schedulePlaybackToggle() {
-        playbackHandler.removeCallbacksAndMessages(null)
-        playbackHandler.postDelayed({ togglePlaybackOnce() }, 300L)
-    }
-
-    fun commitPlaybackToggle() {
-        playbackHandler.removeCallbacksAndMessages(null)
-        togglePlaybackOnce()
     }
 
     fun handleDoubleTap(x: Float, width: Float) {
@@ -359,7 +338,7 @@ fun FullscreenPlayer(
         when {
             x < width * 0.35f -> seekBy(-10_000L)
             x > width * 0.65f -> seekBy(10_000L)
-            else -> commitPlaybackToggle()
+            else -> togglePlayback()
         }
     }
 
@@ -377,7 +356,40 @@ fun FullscreenPlayer(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .then(letterboxTaps),
+            .then(letterboxTaps)
+            // Draw the center control without a layout node so it cannot intercept the player's tap gestures.
+            .drawWithContent {
+                drawContent()
+                if (controlsVisible && !pipMode) {
+                    val radius = 31.dp.toPx()
+                    drawCircle(Color.Black.copy(alpha = 0.42f), radius, center)
+                    if (playing) {
+                        val barWidth = 5.dp.toPx()
+                        val barHeight = 22.dp.toPx()
+                        val gap = 6.dp.toPx()
+                        drawRoundRect(
+                            Color.White,
+                            topLeft = Offset(center.x - gap - barWidth / 2f, center.y - barHeight / 2f),
+                            size = Size(barWidth, barHeight),
+                            cornerRadius = CornerRadius(2.5.dp.toPx()),
+                        )
+                        drawRoundRect(
+                            Color.White,
+                            topLeft = Offset(center.x + gap - barWidth / 2f, center.y - barHeight / 2f),
+                            size = Size(barWidth, barHeight),
+                            cornerRadius = CornerRadius(2.5.dp.toPx()),
+                        )
+                    } else {
+                        val play = Path().apply {
+                            moveTo(center.x - 5.dp.toPx(), center.y - 11.dp.toPx())
+                            lineTo(center.x - 5.dp.toPx(), center.y + 11.dp.toPx())
+                            lineTo(center.x + 11.dp.toPx(), center.y)
+                            close()
+                        }
+                        drawPath(play, Color.White)
+                    }
+                }
+            },
     ) {
             key(media.uri) {
                 AndroidView(
@@ -400,7 +412,7 @@ fun FullscreenPlayer(
                                             abs(screenX - metrics.widthPixels / 2f) <= centerSlop &&
                                             abs(screenY - metrics.heightPixels / 2f) <= centerSlop
                                         if (centerTap) {
-                                            schedulePlaybackToggle()
+                                            togglePlayback()
                                         } else {
                                             controlsVisible = !controlsVisible
                                         }
@@ -547,36 +559,7 @@ fun FullscreenPlayer(
                                 )
                             }
                         }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(62.dp)
-                            .background(Color.Black.copy(alpha = 0.42f), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        IconButton(
-                            onClick = {
-                                val now = SystemClock.elapsedRealtime()
-                                if (now - lastCenterTapAt < 300L) {
-                                    lastCenterTapAt = 0L
-                                    commitPlaybackToggle()
-                                } else {
-                                    lastCenterTapAt = now
-                                    schedulePlaybackToggle()
-                                }
-                            },
-                            modifier = Modifier.size(62.dp),
-                        ) {
-                            Icon(
-                                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = if (playing) "Pause" else "Play",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp),
-                            )
-                        }
-                    }
+                                        }
 
                     Column(
                         modifier = Modifier
