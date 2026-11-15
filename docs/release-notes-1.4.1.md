@@ -47,6 +47,9 @@ project key as 1.4.0, so it installs over it and keeps your settings and downloa
   Scheme v2.
 - The 1.4.1 signing certificate matches the published 1.4.0 certificate.
 - The signed 1.4.1 APK installs over the signed 1.4.0 APK on the API 35 emulator and launches.
+- The live in-app update was tested from 1.4.0: Settings, Updates found 1.4.1, downloaded the
+  signed APK, and Android installed versionCode 20 over 1.4.0. A later check reported that the app
+  is on the newest version.
 - The player checks covered swipe paging, previous and next controls, Pause, full-screen rotation,
   system-bar restore, caption visibility and the lighter caption treatment.
 - The YouTube `Best` test selected 2160p and started a download without HTTP 403.
@@ -57,8 +60,6 @@ project key as 1.4.0, so it installs over it and keeps your settings and downloa
 - The specific video that returned HTTP 403 was not available for a live retry test.
 - The 2160p test was stopped after it started to avoid downloading the entire file.
 - Player and caption checks ran on the API 35 emulator, not a physical phone.
-- The live GitHub in-app update from 1.4.0 to 1.4.1 was not exercised before publication; the
-  direct replacement install from 1.4.0 was verified.
 - The release build does not bake a resolver instance. TikTok, X and Pinterest need one configured
   in Settings or supplied at build time.
 - Play Protect may still warn because AnyVideo is sideloaded and keeps the in-app updater.
