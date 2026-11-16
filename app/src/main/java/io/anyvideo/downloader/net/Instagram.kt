@@ -110,7 +110,7 @@ object Instagram {
      * [cookie] is attached to every Instagram-hosted media URL, so a signed-in session can fetch
      * media that is not public. It travels with the DownloadManager request as a header.
      */
-    private fun itemsToCandidates(
+    internal fun itemsToCandidates(
         items: JSONArray,
         sourceUrl: String,
         cookie: String? = null,
@@ -127,13 +127,35 @@ object Instagram {
                 for (c in 0 until carousel.length()) {
                     val child = carousel.optJSONObject(c) ?: continue
                     val node = child.optJSONObject("node") ?: child
-                    out += candidateFromNode(node, user, nodeId.ifBlank { node.optString("id") }, sourceUrl, c, cookie)
+                    candidateFromNode(
+                        node = node,
+                        user = user,
+                        parentId = nodeId.ifBlank { node.optString("id") },
+                        sourceUrl = sourceUrl,
+                        index = c,
+                        cookie = cookie,
+                    )?.let { out += it }
                 }
             } else {
-                out += candidateFromNode(item, user, nodeId, sourceUrl, 0, cookie)
+                candidateFromNode(item, user, nodeId, sourceUrl, 0, cookie)?.let { out += it }
             }
         }
         return out
+    }
+
+    /**
+     * Instagram sometimes leaves a carousel entry with an empty image or video candidate but
+     * still supplies `display_url`. Ignore unusable values so the caller can fall back instead of
+     * creating a blank card and handing an empty URL to OkHttp.
+     */
+    private fun mediaUrl(value: String?): String? {
+        val raw = value?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        val normalized = if (raw.startsWith("//")) "https:$raw" else raw
+        return normalized.takeIf {
+            it.startsWith("https://", ignoreCase = true) ||
+                it.startsWith("http://", ignoreCase = true)
+        }
     }
 
     private fun candidateFromNode(
@@ -143,11 +165,13 @@ object Instagram {
         sourceUrl: String,
         index: Int,
         cookie: String?,
-    ): MediaCandidate {
+    ): MediaCandidate? {
         val video = bestVideoUrl(node)
         val image = bestImageUrl(node)
-        val isVideo = video != null || node.optBoolean("is_video") || node.optString("media_type") == "2"
-        val url = video ?: image ?: node.optString("display_url")
+        val url = video ?: image ?: return null
+        // A thumbnail is not a playable video. If the payload omitted the video URL, skip the
+        // entry instead of saving its cover as an .mp4 or presenting it as a downloadable item.
+        val isVideo = video != null
         val nodeId = node.optString("id").ifBlank { node.optString("pk").ifBlank { parentId } }
         val suffix = if (index > 0) "_$index" else ""
         val ext = FileNames.extensionFromUrl(url, isVideo)
@@ -173,24 +197,28 @@ object Instagram {
 
     private fun bestVideoUrl(node: JSONObject): String? {
         node.optJSONArray("video_versions")?.let { versions ->
-            if (versions.length() > 0) return versions.optJSONObject(0)?.optString("url")
+            for (i in 0 until versions.length()) {
+                mediaUrl(versions.optJSONObject(i)?.optString("url"))?.let { return it }
+            }
         }
-        val direct = node.optString("video_url")
-        if (direct.isNotBlank()) return direct
-        return null
+        return mediaUrl(node.optString("video_url"))
     }
 
     private fun bestImageUrl(node: JSONObject): String? {
         node.optJSONArray("image_versions2")?.let { versions ->
             val candidates = versions.optJSONObject(0)?.optJSONArray("candidates")
-            if (candidates != null && candidates.length() > 0) {
-                return candidates.optJSONObject(0)?.optString("url")
+            if (candidates != null) {
+                for (i in 0 until candidates.length()) {
+                    mediaUrl(candidates.optJSONObject(i)?.optString("url"))?.let { return it }
+                }
             }
         }
         val display = node.optString("display_url").ifBlank { node.optString("thumbnail_src") }
-        if (display.isNotBlank()) return display
+        mediaUrl(display)?.let { return it }
         node.optJSONArray("display_resources")?.let { resources ->
-            if (resources.length() > 0) return resources.optJSONObject(0)?.optString("src")
+            for (i in 0 until resources.length()) {
+                mediaUrl(resources.optJSONObject(i)?.optString("src"))?.let { return it }
+            }
         }
         return null
     }
@@ -201,8 +229,12 @@ object Instagram {
         } ?: return emptyList()
         val user = Regex("\"owner\":\\{\"username\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)
             ?: Regex("@([A-Za-z0-9._]+)").find(html)?.groupValues?.get(1)
-        val image = Regex("\"display_url\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)?.replace("\\/", "/")
-        val video = Regex("\"video_url\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)?.replace("\\/", "/")
+        val image = mediaUrl(
+            Regex("\"display_url\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)?.replace("\\/", "/"),
+        )
+        val video = mediaUrl(
+            Regex("\"video_url\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)?.replace("\\/", "/"),
+        )
         val url = video ?: image ?: return emptyList()
         val isVideo = video != null
         return listOf(

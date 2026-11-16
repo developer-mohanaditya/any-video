@@ -5,6 +5,7 @@ import io.anyvideo.downloader.net.Instagram
 import io.anyvideo.downloader.net.MediaApi
 import io.anyvideo.downloader.net.Resolver
 import io.anyvideo.downloader.ui.formatDuration
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -113,6 +114,49 @@ class CoreLogicTest {
         val id = Instagram.mediaId("B")
         assertEquals("1", id)
         assertTrue(Instagram.mediaId("C1a2B3c4").all(Char::isDigit))
+    }
+
+    @Test
+    fun `instagram carousel skips missing urls and keeps usable fallbacks`() {
+        val payload = JSONObject(
+            """
+            {"items":[{"id":"parent","user":{"username":"tester"},"carousel_media":[
+              {"id":"fallback","image_versions2":{"candidates":[{"url":""}]},"display_url":"https://cdn.example/fallback.jpg"},
+              {"id":"missing"},
+              {"id":"video","video_versions":[{"url":""},{"url":"https://cdn.example/video.mp4"}]},
+              {"id":"relative","display_url":"//cdn.example/protocol.jpg"}
+            ]}]}
+            """.trimIndent(),
+        )
+        val candidates = Instagram.itemsToCandidates(
+            payload.getJSONArray("items"),
+            "https://www.instagram.com/p/C1a2B3c4/",
+        )
+
+        assertEquals(3, candidates.size)
+        assertEquals("https://cdn.example/fallback.jpg", candidates[0].url)
+        assertEquals(false, candidates[0].isVideo)
+        assertEquals("https://cdn.example/video.mp4", candidates[1].url)
+        assertEquals(true, candidates[1].isVideo)
+        assertEquals("https://cdn.example/protocol.jpg", candidates[2].url)
+    }
+
+    @Test
+    fun `instagram carousel with no usable media urls returns nothing`() {
+        val payload = JSONObject(
+            """
+            {"items":[{"id":"parent","user":{"username":"tester"},"carousel_media":[
+              {"id":"missing"},
+              {"id":"blank","image_versions2":{"candidates":[{"url":""}]}}
+            ]}]}
+            """.trimIndent(),
+        )
+        val candidates = Instagram.itemsToCandidates(
+            payload.getJSONArray("items"),
+            "https://www.instagram.com/p/C1a2B3c4/",
+        )
+
+        assertTrue(candidates.isEmpty())
     }
 
     @Test
