@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.0.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.5.0-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.1.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.5.1-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-11_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11 and newer" />
 
@@ -15,16 +15,18 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.5.0.apk`, about 1.8 MB.
+The installable file is `AnyVideo-1.5.1.apk`, about 1.8 MB.
 
-- Direct download: [AnyVideo-1.5.0.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.0.apk)
+- Direct download: [AnyVideo-1.5.1.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.1.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.5.0.apk](AnyVideo-1.5.0.apk)
+- Copy in the repository: [AnyVideo-1.5.1.apk](AnyVideo-1.5.1.apk)
 
 Android 11 or newer is the supported baseline. The APK is signed with the project release key, so later versions install
-over this one and keep your settings and downloads. Android will ask once for permission to
-install from your browser or file manager, and Play Protect may ask you to confirm because the
-app does not come from the Play Store.
+over this one and keep your settings and downloads. This release includes a default resolver, so
+Instagram, TikTok, X and Pinterest work without separate server setup. If a custom server was
+saved in an older install, use Settings, Resolver, Clear server to return to the included default.
+Android will ask once for permission to install from your browser or file manager, and Play
+Protect may ask you to confirm because the app does not come from the Play Store.
 
 After the first install, Settings, Updates, Check for updates checks GitHub. AnyVideo also checks
 once a day when it starts and offers a new release in a prompt. The signed APK downloads inside
