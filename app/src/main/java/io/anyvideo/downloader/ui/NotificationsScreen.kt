@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -269,6 +270,9 @@ private fun ActiveDownloadCard(
     onCancel: () -> Unit,
 ) {
     val percent = (task.progress * 100).toInt().coerceIn(0, 100)
+    val queued = task.state == Downloader.State.QUEUED
+    // The status text sits under the bar, so center the actions on the bar itself.
+    val actionLift = if (queued) 0.dp else -(CompactActionSize - ProgressBarHeight) / 2
     var menuOpen by remember(task.id) { mutableStateOf(false) }
 
     Surface(
@@ -313,24 +317,24 @@ private fun ActiveDownloadCard(
             }
 
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = if (task.state == Downloader.State.QUEUED) 8.dp else 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(top = if (queued) 8.dp else 12.dp),
+                verticalAlignment = if (queued) Alignment.CenterVertically else Alignment.Top,
             ) {
                 // Keep the bar and status text in 80% of the card, leaving the last 20%
                 // for the actions. They share this row instead of taking a footer row.
                 Column(modifier = Modifier.fillMaxWidth(0.8f)) {
-                    if (task.state != Downloader.State.QUEUED) {
+                    if (!queued) {
                         if (task.total > 0L) {
                             LinearProgressIndicator(
                                 progress = { task.progress },
-                                modifier = Modifier.fillMaxWidth().height(5.dp),
+                                modifier = Modifier.fillMaxWidth().height(ProgressBarHeight),
                             )
                         } else if (task.state == Downloader.State.RUNNING) {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp))
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(ProgressBarHeight))
                         } else {
                             LinearProgressIndicator(
                                 progress = { task.progress },
-                                modifier = Modifier.fillMaxWidth().height(5.dp),
+                                modifier = Modifier.fillMaxWidth().height(ProgressBarHeight),
                             )
                         }
                         Spacer(Modifier.height(2.dp))
@@ -344,40 +348,42 @@ private fun ActiveDownloadCard(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                CompactActionIcon(
-                    icon = when (task.state) {
-                        Downloader.State.RUNNING -> Icons.Filled.Pause
-                        else -> Icons.Filled.PlayArrow
-                    },
-                    description = when (task.state) {
-                        Downloader.State.RUNNING -> "Pause"
-                        Downloader.State.PAUSED -> "Resume"
-                        else -> "Start"
-                    },
-                    onClick = when (task.state) {
-                        Downloader.State.RUNNING -> onPause
-                        Downloader.State.PAUSED -> onResume
-                        else -> onStart
-                    },
-                )
-                Spacer(Modifier.width(2.dp))
-                Box {
+                Row(modifier = Modifier.offset(y = actionLift)) {
                     CompactActionIcon(
-                        icon = Icons.Filled.MoreVert,
-                        description = "More options",
-                        onClick = { menuOpen = true },
+                        icon = when (task.state) {
+                            Downloader.State.RUNNING -> Icons.Filled.Pause
+                            else -> Icons.Filled.PlayArrow
+                        },
+                        description = when (task.state) {
+                            Downloader.State.RUNNING -> "Pause"
+                            Downloader.State.PAUSED -> "Resume"
+                            else -> "Start"
+                        },
+                        onClick = when (task.state) {
+                            Downloader.State.RUNNING -> onPause
+                            Downloader.State.PAUSED -> onResume
+                            else -> onStart
+                        },
                     )
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Cancel download") },
-                            onClick = {
-                                menuOpen = false
-                                onCancel()
-                            },
+                    Spacer(Modifier.width(2.dp))
+                    Box {
+                        CompactActionIcon(
+                            icon = Icons.Filled.MoreVert,
+                            description = "More options",
+                            onClick = { menuOpen = true },
                         )
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Cancel download") },
+                                onClick = {
+                                    menuOpen = false
+                                    onCancel()
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -510,11 +516,14 @@ private fun Pill(
     }
 }
 
+private val CompactActionSize = 24.dp
+private val ProgressBarHeight = 5.dp
+
 @Composable
 private fun CompactActionIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(24.dp)
+            .size(CompactActionSize)
             .clip(RoundedCornerShape(8.dp))
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
