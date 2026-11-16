@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.4.2.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.4.2-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.0.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.5.0-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-11_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11 and newer" />
 
@@ -15,11 +15,11 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.4.2.apk`, about 1.8 MB.
+The installable file is `AnyVideo-1.5.0.apk`, about 1.8 MB.
 
-- Direct download: [AnyVideo-1.4.2.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.4.2.apk)
+- Direct download: [AnyVideo-1.5.0.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.0.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.4.2.apk](AnyVideo-1.4.2.apk)
+- Copy in the repository: [AnyVideo-1.5.0.apk](AnyVideo-1.5.0.apk)
 
 Android 11 or newer is the supported baseline. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. Android will ask once for permission to
@@ -124,9 +124,9 @@ pick to the usual folders.
 Downloads has separate Photos, Videos and Audio tabs for the files saved on your phone. Swipe
 left and right to move between them, tap a tile to preview it full screen, and swipe left or right
 again in the preview to move through the rest of that tab. Long press a tile to select several,
-then share or delete them together. Live download progress, completed files and failures appear
-in the system notification instead of taking over this screen. Pause, Resume and Cancel are in
-the notification while transfers run, and batches start automatically.
+then share or delete them together. Live transfers and this session's completed or failed files
+appear in Notifications, opened from the bell on Home. Pause, Resume and Cancel are also in the
+system notification while transfers run, and batches start automatically.
 
 ## Instagram, and the risk that comes with it
 

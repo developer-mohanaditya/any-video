@@ -63,8 +63,8 @@ android {
         applicationId = "io.anyvideo.downloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.4.2"
+        versionCode = 22
+        versionName = "1.5.0"
 
         buildConfigField("String", "DEFAULT_RESOLVER_API", "\"$bakedResolver\"")
     }
