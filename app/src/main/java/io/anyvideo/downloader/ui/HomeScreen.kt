@@ -414,7 +414,7 @@ fun HomeScreen(
             )
             HeaderBrands()
             Spacer(Modifier.width(5.dp))
-            DownloadStatusButton(downloadTasks) { onNavigate(Screen.DOWNLOADS) }
+            DownloadStatusButton(downloadTasks) { onNavigate(Screen.NOTIFICATIONS) }
         }
 
         if (recent.isNotEmpty()) {

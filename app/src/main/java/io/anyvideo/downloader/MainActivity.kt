@@ -54,6 +54,7 @@ import io.anyvideo.downloader.ui.RingtoneScreen
 import io.anyvideo.downloader.ui.DownloadsScreen
 import io.anyvideo.downloader.ui.HomeScreen
 import io.anyvideo.downloader.ui.LineBreakScreen
+import io.anyvideo.downloader.ui.NotificationsScreen
 import io.anyvideo.downloader.ui.RepostScreen
 import io.anyvideo.downloader.ui.SettingsScreen
 import io.anyvideo.downloader.ui.SplashScreen
@@ -72,7 +73,7 @@ import io.anyvideo.downloader.ui.tools.SquarePhotoScreen
 import kotlinx.coroutines.delay
 
 enum class Screen {
-    HOME, DOWNLOADS, BROWSE, TOOLS,
+    HOME, DOWNLOADS, NOTIFICATIONS, BROWSE, TOOLS,
     REPOST, CAPTIONS, GRID, SQUARE, RESIZE, DP, LINE_BREAK, WHATSAPP, BULK,
     CLIP, RINGTONE, SETTINGS,
 }
@@ -300,7 +301,8 @@ private fun AppRootContent(
     }
 
     val showTabs = screen in setOf(
-        Screen.HOME, Screen.DOWNLOADS, Screen.BROWSE, Screen.TOOLS, Screen.SETTINGS,
+        Screen.HOME, Screen.DOWNLOADS, Screen.NOTIFICATIONS, Screen.BROWSE,
+        Screen.TOOLS, Screen.SETTINGS,
     ) && !(screen == Screen.BROWSE && browserFullscreen)
     LaunchedEffect(screen) { if (screen != Screen.BROWSE) browserFullscreen = false }
     BackHandler(enabled = screen != Screen.HOME) {
@@ -317,7 +319,9 @@ private fun AppRootContent(
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     tabs.forEach { tab ->
                         NavigationBarItem(
-                            selected = screen == tab.screen,
+                            // Notifications is opened from Home, so Home stays the parent tab.
+                            selected = screen == tab.screen ||
+                                (screen == Screen.NOTIFICATIONS && tab.screen == Screen.HOME),
                             onClick = { screen = tab.screen },
                             icon = { Icon(tab.icon, contentDescription = tab.label) },
                             label = { Text(tab.label) },
@@ -336,6 +340,8 @@ private fun AppRootContent(
                 )
 
                 Screen.DOWNLOADS -> DownloadsScreen()
+
+                Screen.NOTIFICATIONS -> NotificationsScreen(onBack = { screen = Screen.HOME })
 
                 Screen.BROWSE -> BrowserScreen(
                     startUrl = browserUrl,
