@@ -2,6 +2,7 @@ package io.anyvideo.downloader.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,9 +48,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -307,36 +312,39 @@ private fun ActiveDownloadCard(
                 )
             }
 
-            if (task.state != Downloader.State.QUEUED) {
-                Spacer(Modifier.height(12.dp))
-                if (task.total > 0L) {
-                    LinearProgressIndicator(
-                        progress = { task.progress },
-                        modifier = Modifier.fillMaxWidth().height(5.dp),
-                    )
-                } else if (task.state == Downloader.State.RUNNING) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp))
-                } else {
-                    LinearProgressIndicator(
-                        progress = { task.progress },
-                        modifier = Modifier.fillMaxWidth().height(5.dp),
-                    )
-                }
-            }
-
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = if (task.state == Downloader.State.QUEUED) 8.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    progressText(task),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                ActionIcon(
+                // Keep the bar and status text in 80% of the card, leaving the last 20%
+                // for the actions. They share this row instead of taking a footer row.
+                Column(modifier = Modifier.fillMaxWidth(0.8f)) {
+                    if (task.state != Downloader.State.QUEUED) {
+                        if (task.total > 0L) {
+                            LinearProgressIndicator(
+                                progress = { task.progress },
+                                modifier = Modifier.fillMaxWidth().height(5.dp),
+                            )
+                        } else if (task.state == Downloader.State.RUNNING) {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp))
+                        } else {
+                            LinearProgressIndicator(
+                                progress = { task.progress },
+                                modifier = Modifier.fillMaxWidth().height(5.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(2.dp))
+                    }
+                    Text(
+                        progressText(task),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                CompactActionIcon(
                     icon = when (task.state) {
                         Downloader.State.RUNNING -> Icons.Filled.Pause
                         else -> Icons.Filled.PlayArrow
@@ -352,9 +360,9 @@ private fun ActiveDownloadCard(
                         else -> onStart
                     },
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(2.dp))
                 Box {
-                    ActionIcon(
+                    CompactActionIcon(
                         icon = Icons.Filled.MoreVert,
                         description = "More options",
                         onClick = { menuOpen = true },
@@ -503,16 +511,20 @@ private fun Pill(
 }
 
 @Composable
-private fun ActionIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier.size(36.dp),
+private fun CompactActionIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
             icon,
-            contentDescription = description,
+            contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(15.dp),
         )
     }
 }
