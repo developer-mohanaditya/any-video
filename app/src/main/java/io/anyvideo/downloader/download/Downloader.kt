@@ -10,6 +10,8 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.widget.Toast
 import io.anyvideo.downloader.data.CaptionStore
@@ -401,11 +403,14 @@ object Downloader {
                         YouTubeFormats.directAudio(task.sourceUrl!!)
                     }.getOrNull()
                     if (direct != null) {
-                        Toast.makeText(
-                            context,
-                            "Downloading as M4A because the resolver could not convert this audio",
-                            Toast.LENGTH_LONG,
-                        ).show()
+                        // Downloader.run executes on Dispatchers.IO; a Toast there crashes the app.
+                        Handler(Looper.getMainLooper()).post {
+                            Toast.makeText(
+                                context,
+                                "Downloading as M4A because the resolver could not convert this audio",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
                         synchronized(inFlight) {
                             inFlight.remove("${task.relativePath}/${task.fileName}")
                             inFlight.add("${task.relativePath}/${direct.fileName}")
