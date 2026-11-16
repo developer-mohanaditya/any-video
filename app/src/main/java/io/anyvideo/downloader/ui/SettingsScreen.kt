@@ -62,9 +62,10 @@ fun SettingsScreen(
     var extractor by remember { mutableStateOf(Prefs.extractorEndpoint) }
     var proxy by remember { mutableStateOf(Prefs.fallbackProxy) }
     var showPrivacy by remember { mutableStateOf(false) }
-    var resolverApi by remember { mutableStateOf(Prefs.resolverApiBase) }
-    var resolverExpanded by remember { mutableStateOf(Prefs.resolverApiOverride.isNotEmpty()) }
-    var resolverKey by remember { mutableStateOf(Prefs.resolverApiKey) }
+    // Never seed these fields with the saved endpoint or key: this screen must not reveal them.
+    var resolverApi by remember { mutableStateOf("") }
+    var resolverExpanded by remember { mutableStateOf(false) }
+    var resolverKey by remember { mutableStateOf("") }
     var advanced by remember { mutableStateOf(Prefs.showAdvancedEndpoints) }
     var testing by remember { mutableStateOf(false) }
     var igCheck by remember { mutableStateOf<IgSession.Check?>(null) }
@@ -206,9 +207,8 @@ fun SettingsScreen(
                         Text("Resolver", fontWeight = FontWeight.SemiBold)
                         Text(
                             when {
-                                Prefs.resolverApiOverride.isNotEmpty() ->
-                                    "Custom server: ${Prefs.resolverApiOverride}"
-                                Prefs.hasBuiltInResolver -> "Built-in instance. Nothing to set up."
+                                Prefs.resolverApiOverride.isNotEmpty() -> "Custom resolver active."
+                                Prefs.hasBuiltInResolver -> "Built-in resolver active. Nothing to set up."
                                 else ->
                                     "No resolver set. Add a cobalt instance to download YouTube, " +
                                         "X, Pinterest and TikTok links."
@@ -240,8 +240,13 @@ fun SettingsScreen(
                     onValueChange = { resolverApi = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("API base URL") },
+                    label = { Text("New API base URL") },
                     placeholder = { Text("https://cobalt.example.com") },
+                )
+                Text(
+                    "The saved server URL is never shown. Enter a new one to replace it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
@@ -255,21 +260,36 @@ fun SettingsScreen(
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = {
-                        Prefs.resolverApiBase = resolverApi
+                        val newBase = resolverApi.trim()
+                        if (newBase.isEmpty()) {
+                            Toast.makeText(
+                                context,
+                                "Enter a new server URL first",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            return@Button
+                        }
+                        Prefs.resolverApiBase = newBase
                         Prefs.resolverApiKey = resolverKey
-                        resolverApi = Prefs.resolverApiBase
-                        Toast.makeText(context, "Saved", Toast.LENGTH_SHORT).show()
+                        resolverApi = ""
+                        resolverKey = ""
+                        resolverExpanded = false
+                        Toast.makeText(context, "Resolver saved", Toast.LENGTH_SHORT).show()
                     }) { Text("Save") }
                     Spacer(Modifier.width(8.dp))
                     TextButton(
                         enabled = !testing,
                         onClick = {
-                            val base = resolverApi.ifBlank { Prefs.resolverApiBase }
-                            Prefs.resolverApiBase = base
-                            Prefs.resolverApiKey = resolverKey
+                            val newBase = resolverApi.trim()
+                            val base = newBase.ifEmpty { Prefs.resolverApiBase }
+                            val key = if (newBase.isEmpty() && resolverKey.isEmpty()) {
+                                Prefs.resolverApiKey
+                            } else {
+                                resolverKey
+                            }
                             testing = true
                             scope.launch {
-                                val message = probeApi(base, resolverKey)
+                                val message = probeApi(base, key)
                                 testing = false
                                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                             }
@@ -284,8 +304,9 @@ fun SettingsScreen(
                     TextButton(onClick = {
                         Prefs.resolverApiOverride = ""
                         Prefs.resolverApiKey = ""
-                        resolverApi = Prefs.resolverApiBase
+                        resolverApi = ""
                         resolverKey = ""
+                        resolverExpanded = false
                         Toast.makeText(
                             context,
                             if (Prefs.hasBuiltInResolver) "Back to the built-in instance"
@@ -511,7 +532,7 @@ private suspend fun probeApi(base: String, key: String): String = withContext(Di
             )
         }
     }
-    val body = Http.get("$clean/", headers) ?: return@withContext "No answer from $clean"
+    val body = Http.get("$clean/", headers) ?: return@withContext "No answer from the resolver"
     runCatching {
         val cobalt = JSONObject(body).optJSONObject("cobalt")
             ?: return@runCatching "Answered, but not like a cobalt instance"
