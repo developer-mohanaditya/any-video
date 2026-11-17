@@ -72,11 +72,9 @@ object Instagram {
     private fun igHeaders(context: Context, cookie: String?): Map<String, String> =
         IgSession.apiHeaders(context, cookie)
 
-    private fun webHeaders(cookie: String?): Map<String, String> = buildMap {
-        put("User-Agent", Http.DESKTOP_UA)
-        put("Accept", "text/html,application/json")
-        if (!cookie.isNullOrBlank()) put("Cookie", cookie)
-    }
+    /** The web fallback must use the same identity as the browser session, not a desktop UA. */
+    private fun webHeaders(context: Context, cookie: String?): Map<String, String> =
+        IgSession.webHeaders(context, cookie, accept = "text/html,application/json")
 
     suspend fun resolvePost(context: Context, url: String): List<MediaCandidate> {
         val code = shortcode(url) ?: return emptyList()
@@ -85,14 +83,16 @@ object Instagram {
 
         val attempts = listOf(
             "https://i.instagram.com/api/v1/media/$id/info/" to igHeaders(context, cookie),
-            "https://www.instagram.com/p/$code/?__a=1&__d=dis" to webHeaders(cookie),
+            // A web login is more likely to be accepted by the same host that owns the cookie.
+            "https://www.instagram.com/api/v1/media/$id/info/" to webHeaders(context, cookie),
+            "https://www.instagram.com/p/$code/?__a=1&__d=dis" to webHeaders(context, cookie),
         )
         for ((endpoint, headers) in attempts) {
             val body = withContext(Dispatchers.IO) { Http.get(endpoint, headers) } ?: continue
             val parsed = parseMediaPayload(body, url, cookie)
             if (parsed.isNotEmpty()) return parsed
         }
-        return scrapeEmbed(url, code, cookie)
+        return scrapeEmbed(context, url, code, cookie)
     }
 
     private fun parseMediaPayload(body: String, sourceUrl: String, cookie: String?): List<MediaCandidate> = try {
@@ -223,9 +223,17 @@ object Instagram {
         return null
     }
 
-    private suspend fun scrapeEmbed(url: String, code: String, cookie: String?): List<MediaCandidate> {
+    private suspend fun scrapeEmbed(
+        context: Context,
+        url: String,
+        code: String,
+        cookie: String?,
+    ): List<MediaCandidate> {
         val html = withContext(Dispatchers.IO) {
-            Http.get("https://www.instagram.com/p/$code/embed/captioned/", webHeaders(cookie))
+            Http.get(
+                "https://www.instagram.com/p/$code/embed/captioned/",
+                webHeaders(context, cookie),
+            )
         } ?: return emptyList()
         val user = Regex("\"owner\":\\{\"username\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)
             ?: Regex("@([A-Za-z0-9._]+)").find(html)?.groupValues?.get(1)
@@ -517,7 +525,9 @@ object Instagram {
             .put("fetch_mutual", false)
             .put("after", cursor ?: "")
         val endpoint = "https://www.instagram.com/graphql/query/?query_hash=$QUERY_HASH_TIMELINE&variables=${variables}"
-        val body = withContext(Dispatchers.IO) { Http.get(endpoint, webHeaders(cookies())) } ?: return emptyList()
+        val body = withContext(Dispatchers.IO) {
+            Http.get(endpoint, webHeaders(context, cookies()))
+        } ?: return emptyList()
         val edges = try {
             JSONObject(body).getJSONObject("data").getJSONObject("user")
                 .getJSONObject("edge_owner_to_timeline_media").getJSONArray("edges")

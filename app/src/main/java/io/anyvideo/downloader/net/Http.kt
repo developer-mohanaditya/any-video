@@ -25,6 +25,11 @@ object Http {
         .followSslRedirects(true)
         .build()
 
+    private val noRedirectClient: OkHttpClient = client.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+
     private val instagramOrigins = listOf(
         "https://i.instagram.com" to "i",
         "https://www.instagram.com" to "www",
@@ -67,10 +72,14 @@ object Http {
      * Like [get] but keeps the status: Instagram answers a gated request with 404/403 and a
      * normal-looking page, so the body alone cannot tell "no such profile" from "not logged in".
      */
-    fun getReply(url: String, headers: Map<String, String> = emptyMap()): Reply? = try {
+    fun getReply(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        followRedirects: Boolean = true,
+    ): Reply? = try {
         val builder = Request.Builder().url(mirror(url)).get()
         headers.forEach { (key, value) -> builder.addHeader(key, value) }
-        client.newCall(builder.build()).execute().use { response ->
+        (if (followRedirects) client else noRedirectClient).newCall(builder.build()).execute().use { response ->
             Reply(response.code, response.body?.string())
         }
     } catch (t: Throwable) {

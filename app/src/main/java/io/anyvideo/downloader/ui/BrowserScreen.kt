@@ -47,6 +47,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import io.anyvideo.downloader.net.IgSession
 
 /**
  * Clicks Instagram's "Decline optional cookies" button once React has rendered it. The banner
@@ -69,10 +70,6 @@ private const val DISMISS_COOKIE_SHEET = """
   }, 400);
 })();
 """
-
-private const val MOBILE_UA =
-    "Mozilla/5.0 (Linux; Android 14; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) " +
-        "Chrome/124.0.0.0 Mobile Safari/537.36"
 
 /**
  * Instagram's login page builds its form inside wrappers that report zero height with overflow
@@ -233,7 +230,7 @@ fun BrowserScreen(
                         settings.setSupportZoom(true)
                         // A phone user agent matters: Instagram answers the desktop one with a
                         // "get the tablet app" interstitial instead of the page.
-                        settings.userAgentString = MOBILE_UA
+                        settings.userAgentString = IgSession.webUserAgent(ctx)
                         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView, newProgress: Int) {

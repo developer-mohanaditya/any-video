@@ -1,6 +1,7 @@
 package io.anyvideo.downloader
 
 import io.anyvideo.downloader.data.FileNames
+import io.anyvideo.downloader.net.IgSession
 import io.anyvideo.downloader.net.Instagram
 import io.anyvideo.downloader.net.MediaApi
 import io.anyvideo.downloader.net.Resolver
@@ -12,6 +13,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoreLogicTest {
+
+    @Test
+    fun `instagram web requests use the browser identity and safe cookies`() {
+        val headers = IgSession.webHeadersFor(
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36",
+            "sessionid=abc; csrftoken=xyz\u0001bad",
+        )
+        assertEquals(
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36",
+            headers["User-Agent"],
+        )
+        assertEquals("936619743392459", headers["X-IG-App-ID"])
+        assertEquals("sessionid=abc; csrftoken=xyzbad", headers["Cookie"])
+        assertEquals("xyzbad", headers["X-CSRFToken"])
+        assertEquals("same-origin", headers["Sec-Fetch-Site"])
+    }
 
     @Test
     fun `filename keeps the original convention and round-trips`() {
