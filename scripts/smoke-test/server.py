@@ -72,6 +72,9 @@ def media_id(shortcode: str) -> str:
 CAROUSEL_CODE = "Cv1Carousel1"
 WEB_CODE = "CwebFallback1"
 EMBED_CODE = "CembedImage1"
+# An image-only post: every JSON tier has no answer for it, the embed names it a plain photo
+# without any file, and the public oEmbed is the only tier that can produce the picture.
+IMAGE_CODE = "CoembedImage1"
 
 
 def v1_payload(media_base: str):
@@ -124,6 +127,32 @@ def embed_page(code: str, media_base: str):
         f'"display_url":"{escaped}"}});\n'
         "</script></body></html>\n"
     )
+
+
+# The embed shell of a photo post: Instagram states the shape (not a sidecar) and withholds
+# every file, which is exactly the reply that used to end in oEmbed with nothing to show.
+EMBED_PHOTO_SHELL = (
+    "<!doctype html><html><body><script>\n"
+    '{"isRichEmbed":false,"isSidecar":false,"contextJSON":null}\n'
+    "</script></body></html>\n"
+)
+
+
+def oembed_payload(code: str, media_base: str):
+    """The public oEmbed shape: one image for a single-photo post."""
+    return {
+        "version": "1.0",
+        "title": "mock image post",
+        "author_name": "oembeduser",
+        "author_id": 1234,
+        "media_id": "5566778899_1234",
+        "provider_name": "Instagram",
+        "provider_url": "https://www.instagram.com",
+        "type": "rich",
+        "thumbnail_url": f"{media_base}/media/square.jpg",
+        "thumbnail_width": 640,
+        "thumbnail_height": 800,
+    }
 
 
 PRIVATE_USER = "mockprivate"
@@ -265,11 +294,29 @@ def make_handler(media_base: str):
                 self._json(200, web_payload(code, media_base))
                 return True
 
+            # oEmbed: /ig/www/api/v1/oembed/?url=https%3A%2F%2Fwww.instagram.com%2Fp%2F<code>%2F
+            if path == "/ig/www/api/v1/oembed/":
+                target = (query.get("url") or [""])[0]
+                found = re.search(r"/p/([^/]+)/", target)
+                code = found.group(1) if found else ""
+                print(f"[harness] ig oembed {code}", flush=True)
+                if code != IMAGE_CODE:
+                    self._record(404)
+                    self._json(404, {"message": "Not found"})
+                    return True
+                self._record(200)
+                self._json(200, oembed_payload(code, media_base))
+                return True
+
             # embed: /ig/www/p/<code>/embed/captioned/
             match = re.match(r"^/ig/www/p/([^/]+)/embed/captioned/$", path)
             if match:
                 code = match.group(1)
                 print(f"[harness] ig embed {code}", flush=True)
+                if code == IMAGE_CODE:
+                    self._record(200)
+                    self._send(200, EMBED_PHOTO_SHELL.encode("utf-8"), "text/html; charset=utf-8")
+                    return True
                 if code not in EMBED_BY_CODE:
                     self._record(404)
                     self._send(404, b"not found", "text/plain")

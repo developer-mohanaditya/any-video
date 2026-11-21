@@ -6,8 +6,8 @@
 
 **Save photos and videos from Instagram, YouTube, TikTok, X and Pinterest straight to your gallery.**
 
-<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.3.apk">
-  <img src="https://img.shields.io/badge/Download_AnyVideo_1.5.3-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
+<a href="https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.4.apk">
+  <img src="https://img.shields.io/badge/Download_AnyVideo_1.5.4-APK-6C4CF1?style=for-the-badge&logo=android&logoColor=white" alt="Download the AnyVideo APK" />
 </a>
 <img src="https://img.shields.io/badge/Android-11_and_newer-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 11 and newer" />
 
@@ -15,11 +15,11 @@
 
 ## Download
 
-The installable file is `AnyVideo-1.5.3.apk`, about 1.8 MB.
+The installable file is `AnyVideo-1.5.4.apk`, about 1.8 MB.
 
-- Direct download: [AnyVideo-1.5.3.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.3.apk)
+- Direct download: [AnyVideo-1.5.4.apk](https://github.com/developer-mohanaditya/any-video/releases/latest/download/AnyVideo-1.5.4.apk)
 - Releases page: [github.com/developer-mohanaditya/any-video/releases](https://github.com/developer-mohanaditya/any-video/releases/latest)
-- Copy in the repository: [AnyVideo-1.5.3.apk](AnyVideo-1.5.3.apk)
+- Copy in the repository: [AnyVideo-1.5.4.apk](AnyVideo-1.5.4.apk)
 
 Android 11 or newer is the supported baseline. The APK is signed with the project release key, so later versions install
 over this one and keep your settings and downloads. This release includes a default resolver, so
@@ -190,6 +190,10 @@ is why it asks for `MANAGE_EXTERNAL_STORAGE` on Android 11 and newer.
   extractor are the fallbacks.
 - Some newer Instagram reels come back from the resolver as their cover image. The app refuses to
   save that still and asks you to sign in to Instagram, which then fetches the video.
+- Instagram only hands an image carousel's slides to the embed page. When it withholds them, AnyVideo
+  says the carousel was incomplete instead of saving the first slide as if it were the whole post.
+  That page is requested as a crawler only when signed out; a signed-in session that gets the empty
+  shell from it and nothing from the API can still be answered with a single image by oEmbed.
 - The app is distributed as an APK because `MANAGE_EXTERNAL_STORAGE` is restricted on Google Play.
 - Android does not allow silent self-installs. The app downloads and verifies the APK, but Android
   still asks you to allow installs from AnyVideo and to confirm the replacement.

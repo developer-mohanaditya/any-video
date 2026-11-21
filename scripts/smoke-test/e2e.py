@@ -98,6 +98,23 @@ SCENARIOS = [
         ],
     },
     {
+        # An image-only post: the API and web tiers have nothing, the embed shell names it a
+        # plain photo, and the public oEmbed supplies the one picture. Nothing may be saved
+        # from the shell, and no video path may be taken for it.
+        "name": "instagram-image-oembed",
+        "url": "https://www.instagram.com/p/CoembedImage1/",
+        "note": "Resolved from Instagram",
+        "items": 1,
+        "button": "Save",
+        "files": [("oembeduser-___5566778899___-.jpg", "square.jpg", ".jpg")],
+        "requests": [
+            "/ig/i/api/v1/media/",
+            "/ig/www/p/CoembedImage1/?__a=1",
+            "/embed/captioned/",
+            "/api/v1/oembed/",
+        ],
+    },
+    {
         "name": "extractor",
         "url": "https://www.tiktok.com/@anyvideo/video/7300000000000000000",
         "note": "Resolved with the generic extractor",

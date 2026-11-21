@@ -12,9 +12,16 @@ object Http {
     const val DESKTOP_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
 
-    /** User agent the original app pins for `i.instagram.com`. */
+    /** A current app identity for `i.instagram.com`; older versions now get challenged. */
     const val INSTAGRAM_UA =
-        "Instagram 241.1.0.18.114 Android (31/12; 420dpi; 1080x2312; samsung; SM-G780F; exynos990; en_US;)"
+        "Instagram 275.0.0.27.98 Android (33/13; 280dpi; 720x1423; Xiaomi; Redmi 7; onclite; qcom; en_US; 458229237)"
+
+    /**
+     * Instagram only fills the embed page's context JSON for a crawler identity. A browser UA
+     * gets the empty app shell, with no slides of a carousel and no stream of a video.
+     */
+    const val CRAWLER_UA =
+        "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 
     const val INSTAGRAM_APP_ID = "936619743392459"
 

@@ -76,8 +76,21 @@ object Instagram {
     private fun webHeaders(context: Context, cookie: String?): Map<String, String> =
         IgSession.webHeaders(context, cookie, accept = "text/html,application/json")
 
-    suspend fun resolvePost(context: Context, url: String): List<MediaCandidate> {
-        val code = shortcode(url) ?: return emptyList()
+    /** Outcome of a post lookup; [note] explains a refusal instead of leaving an empty screen. */
+    internal data class PostMedia(
+        val items: List<MediaCandidate> = emptyList(),
+        val note: String? = null,
+    )
+
+    /** What the public pages say a post is, which decides whether one image is an honest answer. */
+    internal enum class PostShape { PHOTO, VIDEO, CAROUSEL, UNKNOWN }
+
+    internal suspend fun resolvePost(
+        context: Context,
+        url: String,
+        allowImageFallback: Boolean = true,
+    ): PostMedia {
+        val code = shortcode(url) ?: return PostMedia()
         val cookie = cookies()
         val id = mediaId(code)
 
@@ -89,21 +102,174 @@ object Instagram {
         )
         for ((endpoint, headers) in attempts) {
             val body = withContext(Dispatchers.IO) { Http.get(endpoint, headers) } ?: continue
-            val parsed = parseMediaPayload(body, url, cookie)
-            if (parsed.isNotEmpty()) return parsed
+            val tally = parseMediaPayload(body, url, cookie) ?: continue
+            if (tally.items.isEmpty()) continue
+            // Handing over 2 of 3 slides looks like a working carousel until the gallery shows
+            // the gap, so an incomplete reply is explained instead of saved.
+            if (tally.incomplete) return PostMedia(note = CAROUSEL_PARTIAL)
+            return PostMedia(tally.items)
         }
-        return scrapeEmbed(context, url, code, cookie)
+        val embed = scrapeEmbed(context, url, code, cookie)
+        // A carousel that lost a slide is reported, not handed over as if it were whole.
+        if (embed.incomplete) return PostMedia(note = CAROUSEL_PARTIAL)
+        if (embed.items.isNotEmpty()) return PostMedia(embed.items)
+        // The embed names the post's shape even when it withholds the files. A video's cover
+        // downloads exactly like a photo, and a carousel's first slide looks like a complete
+        // post, so neither is accepted as what the link points at.
+        when (embed.shape) {
+            PostShape.VIDEO -> return PostMedia(note = COVER_ONLY)
+            PostShape.CAROUSEL -> return PostMedia(note = CAROUSEL_PARTIAL)
+            PostShape.PHOTO, PostShape.UNKNOWN -> Unit
+        }
+        if (!allowImageFallback) return PostMedia()
+        // oEmbed answers with exactly one image, so it is only honest for a single-photo post.
+        // When the embed did not say, the post page's og: tags do, where a video served under
+        // /p/ still keeps its /reel/ route.
+        if (embed.shape == PostShape.UNKNOWN && scrapePostShape(code) == PostShape.VIDEO) {
+            return PostMedia(note = COVER_ONLY)
+        }
+        return PostMedia(scrapeOEmbed(context, url, code, cookie))
     }
 
-    private fun parseMediaPayload(body: String, sourceUrl: String, cookie: String?): List<MediaCandidate> = try {
+    internal fun parseMediaItems(body: String): JSONArray? = try {
         val root = JSONObject(body)
-        val items = root.optJSONArray("items") ?: run {
-            val graphql = root.optJSONObject("graphql")
-            if (graphql != null) JSONArray().put(graphql.optJSONObject("shortcode_media") ?: JSONObject()) else null
+        root.optJSONArray("items")?.takeIf { it.length() > 0 } ?: run {
+            val holder = root.optJSONObject("graphql")
+                ?: root.optJSONObject("data")
+                ?: root
+            val node = holder.optJSONObject("shortcode_media")
+                ?: holder.optJSONObject("xdt_shortcode_media")
+                ?: return null
+            JSONArray().put(node)
         }
-        if (items == null || items.length() == 0) emptyList() else itemsToCandidates(items, sourceUrl, cookie)
+    } catch (t: Throwable) {
+        null
+    }
+
+    private fun parseMediaPayload(body: String, sourceUrl: String, cookie: String?): ItemTally? =
+        parseMediaItems(body)?.let { tallyItems(it, sourceUrl, cookie) }
+
+    /**
+     * Instagram's embed page wraps the post in a JSON string named `contextJSON`. A flat
+     * `"display_url"` scrape misses it because every quote is escaped, which made single-image
+     * posts (and image-only carousels) look empty even when the page contained the media.
+     *
+     * The page states the shape of a post even when it withholds the files: `isSidecar` marks a
+     * carousel, a `GraphVideo` context a video, and a null context a plain photo. Both matter,
+     * because saving a cover or the first slide downloads exactly like a successful photo.
+     */
+    internal data class EmbedProbe(
+        val items: List<MediaCandidate> = emptyList(),
+        val shape: PostShape = PostShape.UNKNOWN,
+        val incomplete: Boolean = false,
+    )
+
+    internal fun parseEmbed(
+        html: String,
+        sourceUrl: String,
+        cookie: String? = null,
+    ): EmbedProbe {
+        val encoded = Regex("\"contextJSON\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"")
+            .find(html)?.groupValues?.get(1)
+        val context = encoded?.let { value ->
+            runCatching { JSONObject("{\"v\":\"$value\"}").getString("v") }
+                .getOrNull()
+                ?.let { decoded -> runCatching { JSONObject(decoded) }.getOrNull() }
+        } ?: return EmbedProbe(shape = shapeOfHtml(html))
+
+        context.optJSONArray("items")?.takeIf { it.length() > 0 }?.let { items ->
+            val tally = tallyItems(items, sourceUrl, cookie)
+            return EmbedProbe(
+                items = tally.items,
+                shape = items.optJSONObject(0)?.let { shapeOfNode(it) } ?: PostShape.UNKNOWN,
+                incomplete = tally.incomplete,
+            )
+        }
+        val holder = context.optJSONObject("gql_data")
+            ?: context.optJSONObject("data")
+            ?: context
+        val node = holder.optJSONObject("shortcode_media")
+            ?: holder.optJSONObject("xdt_shortcode_media")
+            ?: return EmbedProbe(shape = shapeOfHtml(html))
+        val tally = tallyItems(JSONArray().put(node), sourceUrl, cookie)
+        return EmbedProbe(
+            items = tally.items,
+            shape = shapeOfNode(node),
+            incomplete = tally.incomplete,
+        )
+    }
+
+    /** A node that lists children is a carousel even when its own `is_video` is false. */
+    internal fun shapeOfNode(node: JSONObject): PostShape = when {
+        node.optInt("media_type") == 8 -> PostShape.CAROUSEL
+        (carouselChildren(node)?.length() ?: 0) > 0 -> PostShape.CAROUSEL
+        isVideoNode(node) -> PostShape.VIDEO
+        // The sources bestImageUrl() accepts are what makes a node a usable photo.
+        bestImageUrl(node) != null -> PostShape.PHOTO
+        else -> PostShape.UNKNOWN
+    }
+
+    /**
+     * Shape from a page's own markers, for replies that carry no parsed node. The JSON inside
+     * `contextJSON` is escaped, so the quotes are normalised before matching.
+     */
+    internal fun shapeOfHtml(html: String): PostShape {
+        val flat = html.replace("\\\"", "\"")
+        return when {
+            flat.contains("\"isSidecar\":true") ||
+                flat.contains("edge_sidecar_to_children") ||
+                flat.contains("\"carousel_media\"") ||
+                flat.contains("\"media_type\":8") -> PostShape.CAROUSEL
+            flat.contains("\"is_video\":true") ||
+                flat.contains("\"type\":\"GraphVideo\"") ||
+                flat.contains("\"video_url\"") ||
+                flat.contains("\"media_type\":2") -> PostShape.VIDEO
+            flat.contains("\"contextJSON\":null") ||
+                flat.contains("\"isSidecar\":false") ||
+                flat.contains("\"display_url\"") -> PostShape.PHOTO
+            else -> PostShape.UNKNOWN
+        }
+    }
+
+    /** The post page names the route in `og:url`, so a video served under `/p/` is still caught. */
+    internal fun shapeOfPage(html: String): PostShape = when {
+        html.contains("property=\"og:video\"") -> PostShape.VIDEO
+        OG_VIDEO_ROUTE.containsMatchIn(html) -> PostShape.VIDEO
+        html.contains("property=\"og:image\"") -> PostShape.PHOTO
+        else -> PostShape.UNKNOWN
+    }
+
+    internal fun candidatesFromOEmbed(
+        body: String,
+        sourceUrl: String,
+        code: String,
+        cookie: String? = null,
+    ): List<MediaCandidate> = try {
+        val root = JSONObject(body)
+        val image = mediaUrl(root.optString("thumbnail_url")) ?: return emptyList()
+        val user = root.optString("author_name").ifBlank { null }
+        val id = root.optString("media_id").substringBefore('_').ifBlank { code }
+        listOf(
+            MediaCandidate(
+                url = image,
+                fileName = FileNames.build(user, id, FileNames.extensionFromUrl(image, false)),
+                thumbnailUrl = image,
+                isVideo = false,
+                sourceUrl = sourceUrl,
+                headers = mediaHeaders(image, cookie),
+            ),
+        )
     } catch (t: Throwable) {
         emptyList()
+    }
+
+    /**
+     * [expected] is how many files the reply described. [incomplete] is true only when a
+     * multi-item post lost one of them: a single unusable item is a different failure, and
+     * calling it a missing slide would give the user the wrong explanation.
+     */
+    internal data class ItemTally(val items: List<MediaCandidate>, val expected: Int) {
+        val incomplete: Boolean get() = expected > 1 && items.size < expected
     }
 
     /**
@@ -114,16 +280,29 @@ object Instagram {
         items: JSONArray,
         sourceUrl: String,
         cookie: String? = null,
-    ): List<MediaCandidate> {
+    ): List<MediaCandidate> = tallyItems(items, sourceUrl, cookie).items
+
+    /** Both reply shapes name a carousel's slides differently; this reads either. */
+    private fun carouselChildren(node: JSONObject): JSONArray? =
+        node.optJSONArray("carousel_media")
+            ?: node.optJSONObject("edge_sidecar_to_children")?.optJSONArray("edges")
+
+    internal fun tallyItems(
+        items: JSONArray,
+        sourceUrl: String,
+        cookie: String? = null,
+    ): ItemTally {
         val out = ArrayList<MediaCandidate>()
+        var expected = 0
         for (i in 0 until items.length()) {
             val item = items.optJSONObject(i) ?: continue
             val user = item.optJSONObject("user")?.optString("username")
                 ?: item.optJSONObject("owner")?.optString("username")
             val nodeId = item.optString("id").ifBlank { item.optString("pk") }
-            val carousel = item.optJSONArray("carousel_media") ?: item.optJSONObject("edge_sidecar_to_children")?.optJSONArray("edges")
+            val carousel = carouselChildren(item)
 
             if (carousel != null && carousel.length() > 0) {
+                expected += carousel.length()
                 for (c in 0 until carousel.length()) {
                     val child = carousel.optJSONObject(c) ?: continue
                     val node = child.optJSONObject("node") ?: child
@@ -137,10 +316,11 @@ object Instagram {
                     )?.let { out += it }
                 }
             } else {
+                expected++
                 candidateFromNode(item, user, nodeId, sourceUrl, 0, cookie)?.let { out += it }
             }
         }
-        return out
+        return ItemTally(out, expected)
     }
 
     /**
@@ -168,9 +348,10 @@ object Instagram {
     ): MediaCandidate? {
         val video = bestVideoUrl(node)
         val image = bestImageUrl(node)
+        // A cover is not the media. When the node says video and the stream is missing, skip it
+        // so the caller can retry or explain, instead of saving the still as a photo.
+        if (video == null && isVideoNode(node)) return null
         val url = video ?: image ?: return null
-        // A thumbnail is not a playable video. If the payload omitted the video URL, skip the
-        // entry instead of saving its cover as an .mp4 or presenting it as a downloadable item.
         val isVideo = video != null
         val nodeId = node.optString("id").ifBlank { node.optString("pk").ifBlank { parentId } }
         val suffix = if (index > 0) "_$index" else ""
@@ -184,6 +365,16 @@ object Instagram {
             headers = mediaHeaders(url, cookie),
         )
     }
+
+    /** True when a node describes a video, even if the reply left its stream URL out. */
+    internal fun isVideoNode(node: JSONObject): Boolean =
+        node.optBoolean("is_video") ||
+            node.optInt("media_type") == 2 ||
+            node.optString("__typename").contains("Video", true) ||
+            node.optString("video_url").isNotBlank() ||
+            node.has("video_versions") ||
+            node.optString("product_type").lowercase() in VIDEO_PRODUCT_TYPES ||
+            node.optDouble("video_duration", 0.0) > 0.0
 
     /** Headers for fetching the media itself; the cookie is what makes private media downloadable. */
     private fun mediaHeaders(url: String, cookie: String?): Map<String, String> {
@@ -228,33 +419,82 @@ object Instagram {
         url: String,
         code: String,
         cookie: String?,
-    ): List<MediaCandidate> {
-        val html = withContext(Dispatchers.IO) {
-            Http.get(
-                "https://www.instagram.com/p/$code/embed/captioned/",
-                webHeaders(context, cookie),
+    ): EmbedProbe {
+        // The embed fills its context JSON only for a crawler identity; a desktop browser gets
+        // the empty app shell, which is why image carousels used to arrive as a single picture.
+        // With a signed-in cookie, keep the browser identity that created the session instead.
+        val headers = if (cookie.isNullOrBlank()) {
+            IgSession.webHeadersFor(
+                Http.CRAWLER_UA,
+                null,
+                accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             )
-        } ?: return emptyList()
+        } else {
+            webHeaders(context, cookie)
+        }
+        val html = withContext(Dispatchers.IO) {
+            Http.get("https://www.instagram.com/p/$code/embed/captioned/", headers)
+        } ?: return EmbedProbe()
+
+        val probe = parseEmbed(html, url, cookie)
+        // A video or a carousel is never answered from the flat scrape below: that would save a
+        // cover, or the first slide in place of the whole carousel.
+        if (probe.items.isNotEmpty() ||
+            probe.incomplete ||
+            probe.shape == PostShape.VIDEO ||
+            probe.shape == PostShape.CAROUSEL
+        ) {
+            return probe
+        }
+
+        // Older embed pages exposed the photo directly instead of inside contextJSON.
         val user = Regex("\"owner\":\\{\"username\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)
             ?: Regex("@([A-Za-z0-9._]+)").find(html)?.groupValues?.get(1)
         val image = mediaUrl(
             Regex("\"display_url\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)?.replace("\\/", "/"),
-        )
-        val video = mediaUrl(
-            Regex("\"video_url\":\"([^\"]+)\"").find(html)?.groupValues?.get(1)?.replace("\\/", "/"),
-        )
-        val url = video ?: image ?: return emptyList()
-        val isVideo = video != null
-        return listOf(
-            MediaCandidate(
-                url = url,
-                fileName = FileNames.build(user, code, FileNames.extensionFromUrl(url, isVideo)),
-                thumbnailUrl = image,
-                isVideo = isVideo,
-                sourceUrl = url,
-                headers = mediaHeaders(url, cookie),
+        ) ?: return probe
+        return EmbedProbe(
+            items = listOf(
+                MediaCandidate(
+                    url = image,
+                    fileName = FileNames.build(user, code, FileNames.extensionFromUrl(image, false)),
+                    thumbnailUrl = image,
+                    isVideo = false,
+                    sourceUrl = url,
+                    headers = mediaHeaders(image, cookie),
+                ),
             ),
+            shape = PostShape.PHOTO,
         )
+    }
+
+    private suspend fun scrapeOEmbed(
+        context: Context,
+        url: String,
+        code: String,
+        cookie: String?,
+    ): List<MediaCandidate> {
+        val target = java.net.URLEncoder.encode("https://www.instagram.com/p/$code/", "UTF-8")
+        val body = withContext(Dispatchers.IO) {
+            Http.get(
+                "https://www.instagram.com/api/v1/oembed/?url=$target",
+                IgSession.webHeaders(context, cookie, accept = "application/json"),
+            )
+        } ?: return emptyList()
+        return candidatesFromOEmbed(body, url, code, cookie)
+    }
+
+    /** Last type check before a single image is saved: the post page says which route it is. */
+    private suspend fun scrapePostShape(code: String): PostShape {
+        val headers = IgSession.webHeadersFor(
+            Http.CRAWLER_UA,
+            null,
+            accept = "text/html,application/xhtml+xml",
+        )
+        val html = withContext(Dispatchers.IO) {
+            Http.get("https://www.instagram.com/p/$code/", headers)
+        } ?: return PostShape.UNKNOWN
+        return shapeOfPage(html)
     }
 
     /**
@@ -546,6 +786,19 @@ object Instagram {
 
     /** Spacing between page requests, which is what keeps a session under Instagram's limits. */
     private const val PAGE_DELAY_MS = 1_200L
+
+    private val VIDEO_PRODUCT_TYPES = setOf("clips", "reel", "igtv")
+
+    /** `og:url` keeps the media route, so a reel or TV video is recognisable from its page. */
+    private val OG_VIDEO_ROUTE = Regex("og:url\"\\s+content=\"[^\"]*/(?:reel|reels|tv)/")
+
+    private const val COVER_ONLY =
+        "Instagram returned only the cover image for that video, so nothing was saved. Sign in " +
+            "to Instagram from Settings, then try the link again."
+
+    private const val CAROUSEL_PARTIAL =
+        "Instagram did not return every slide of that carousel, so nothing was saved. Try the " +
+            "link again; if it keeps happening, sign in from Settings."
 
     private const val PRIVATE_SIGNED_OUT =
         "That account is private. Sign in from Settings with an account that follows it, " +

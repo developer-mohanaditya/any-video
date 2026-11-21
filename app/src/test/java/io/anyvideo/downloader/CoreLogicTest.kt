@@ -134,6 +134,77 @@ class CoreLogicTest {
     }
 
     @Test
+    fun `instagram embed context exposes a single image`() {
+        val context = """
+            {"gql_data":{"shortcode_media":{"id":"111","owner":{"username":"tester"},"display_url":"https://cdn.example/photo.jpg"}}}
+        """.trimIndent()
+        val html = """<script>"init",[],[{"isRichEmbed":false,"contextJSON":${JSONObject.quote(context)}}]]</script>"""
+
+        val candidates = Instagram.parseEmbed(html, "https://www.instagram.com/p/C1a2B3c4/").items
+
+        assertEquals(1, candidates.size)
+        assertEquals("https://cdn.example/photo.jpg", candidates[0].url)
+        assertEquals(false, candidates[0].isVideo)
+        assertTrue(candidates[0].fileName.startsWith("tester-___111___-"))
+    }
+
+    @Test
+    fun `instagram embed context keeps every carousel child`() {
+        val context = """
+            {"gql_data":{"shortcode_media":{"id":"111","owner":{"username":"tester"},"edge_sidecar_to_children":{"edges":[
+              {"node":{"id":"one","display_url":"https://cdn.example/one.jpg"}},
+              {"node":{"id":"two","display_url":"https://cdn.example/two.jpg"}}
+            ]}}}}
+        """.trimIndent()
+        val html = """<script>"init",[],[{"contextJSON":${JSONObject.quote(context)}}]]</script>"""
+
+        val candidates = Instagram.parseEmbed(html, "https://www.instagram.com/p/C1a2B3c4/").items
+
+        assertEquals(2, candidates.size)
+        assertEquals("https://cdn.example/one.jpg", candidates[0].url)
+        assertEquals("https://cdn.example/two.jpg", candidates[1].url)
+    }
+
+    @Test
+    fun `instagram oembed is a usable image fallback`() {
+        val body = """
+            {"thumbnail_url":"https://scontent.example/photo.jpg","author_name":"tester","media_id":"4026078363327388337_9402315705"}
+        """.trimIndent()
+
+        val candidates = Instagram.candidatesFromOEmbed(
+            body,
+            "https://www.instagram.com/p/C1a2B3c4/",
+            "C1a2B3c4",
+        )
+
+        assertEquals(1, candidates.size)
+        assertEquals("https://scontent.example/photo.jpg", candidates[0].url)
+        assertEquals(false, candidates[0].isVideo)
+        assertTrue(candidates[0].fileName.startsWith("tester-___4026078363327388337___-"))
+    }
+
+    @Test
+    fun `instagram oembed without an image returns nothing`() {
+        val candidates = Instagram.candidatesFromOEmbed(
+            """{"author_name":"tester"}""",
+            "https://www.instagram.com/p/C1a2B3c4/",
+            "C1a2B3c4",
+        )
+
+        assertTrue(candidates.isEmpty())
+    }
+
+    @Test
+    fun `instagram graphql post payload is wrapped as one item`() {
+        val items = Instagram.parseMediaItems(
+            """{"graphql":{"shortcode_media":{"id":"111","display_url":"https://cdn.example/photo.jpg"}}}""",
+        )
+
+        assertEquals(1, items?.length())
+        assertEquals("111", items?.optJSONObject(0)?.optString("id"))
+    }
+
+    @Test
     fun `instagram carousel skips missing urls and keeps usable fallbacks`() {
         val payload = JSONObject(
             """
@@ -194,5 +265,111 @@ class CoreLogicTest {
         assertTrue(Resolver.isSupported("https://vm.tiktok.com/abc"))
         assertTrue(Resolver.isSupported("https://www.facebook.com/watch?v=1"))
         assertTrue(!Resolver.isSupported("https://example.org/file.mp4"))
+    }
+
+    @Test
+    fun `instagram video node without a stream is never saved as its cover`() {
+        val payload = JSONObject(
+            """
+            {"items":[{"id":"parent","user":{"username":"tester"},"carousel_media":[
+              {"id":"novideo","is_video":true,"display_url":"https://cdn.example/cover.jpg"},
+              {"id":"emptyversions","video_versions":[],"display_url":"https://cdn.example/cover2.jpg"},
+              {"id":"photo","display_url":"https://cdn.example/photo.jpg"}
+            ]}]}
+            """.trimIndent(),
+        )
+        val candidates = Instagram.itemsToCandidates(
+            payload.getJSONArray("items"),
+            "https://www.instagram.com/p/C1a2B3c4/",
+        )
+
+        assertEquals(1, candidates.size)
+        assertEquals("https://cdn.example/photo.jpg", candidates[0].url)
+        assertEquals(false, candidates[0].isVideo)
+    }
+
+    @Test
+    fun `instagram embed reports a carousel and flags a slide it could not read`() {
+        val context = """
+            {"gql_data":{"shortcode_media":{"id":"111","owner":{"username":"tester"},"edge_sidecar_to_children":{"edges":[
+              {"node":{"id":"one","display_url":"https://cdn.example/one.jpg"}},
+              {"node":{"id":"two","is_video":true,"display_url":"https://cdn.example/two-cover.jpg"}}
+            ]}}}}
+        """.trimIndent()
+        val html = """<script>"init",[],[{"contextJSON":${JSONObject.quote(context)}}]]</script>"""
+
+        val probe = Instagram.parseEmbed(html, "https://www.instagram.com/p/C1a2B3c4/")
+
+        assertEquals(Instagram.PostShape.CAROUSEL, probe.shape)
+        assertEquals(1, probe.items.size)
+        assertEquals("https://cdn.example/one.jpg", probe.items[0].url)
+        assertTrue(probe.incomplete)
+    }
+
+    @Test
+    fun `instagram embed keeps a video stream instead of its cover`() {
+        val context = """
+            {"context":{"type":"GraphVideo"},"gql_data":{"shortcode_media":{"id":"111","is_video":true,"video_url":"https://cdn.example/clip.mp4","display_url":"https://cdn.example/cover.jpg","owner":{"username":"tester"}}}}
+        """.trimIndent()
+        val html = """<script>"init",[],[{"contextJSON":${JSONObject.quote(context)}}]]</script>"""
+
+        val probe = Instagram.parseEmbed(html, "https://www.instagram.com/p/C1a2B3c4/")
+
+        assertEquals(Instagram.PostShape.VIDEO, probe.shape)
+        assertEquals(1, probe.items.size)
+        assertEquals("https://cdn.example/clip.mp4", probe.items[0].url)
+        assertTrue(probe.items[0].isVideo)
+    }
+
+    @Test
+    fun `instagram embed shape separates a photo shell from a video reply`() {
+        val photo = """{"isRichEmbed":false,"isSidecar":false,"contextJSON":null}"""
+        val sidecar = """{"isSidecar":true,"contextJSON":null}"""
+        val video =
+            """<script>{"contextJSON":"{\"gql_data\":{\"shortcode_media\":{\"is_video\":true,\"video_url\":\"https://cdn.example/v.mp4\"}}}"}</script>"""
+
+        assertEquals(Instagram.PostShape.PHOTO, Instagram.shapeOfHtml(photo))
+        assertEquals(Instagram.PostShape.CAROUSEL, Instagram.shapeOfHtml(sidecar))
+        assertEquals(Instagram.PostShape.VIDEO, Instagram.shapeOfHtml(video))
+        assertEquals(
+            Instagram.PostShape.UNKNOWN,
+            Instagram.shapeOfHtml("<!doctype html><title>Instagram</title>"),
+        )
+    }
+
+    @Test
+    fun `instagram post page marks a reel route as video`() {
+        val reel = """<meta property="og:url" content="https://www.instagram.com/user/reel/C1a2B3c4/"><meta property="og:image" content="https://cdn.example/cover.jpg">"""
+        val photo = """<meta property="og:url" content="https://www.instagram.com/user/p/C1a2B3c4/"><meta property="og:image" content="https://cdn.example/photo.jpg">"""
+
+        assertEquals(Instagram.PostShape.VIDEO, Instagram.shapeOfPage(reel))
+        assertEquals(Instagram.PostShape.PHOTO, Instagram.shapeOfPage(photo))
+    }
+
+    @Test
+    fun `instagram only calls a loss a missing slide when the post had several`() {
+        val single = Instagram.tallyItems(
+            JSONObject(
+                """{"items":[{"id":"v","is_video":true,"display_url":"https://cdn.example/cover.jpg"}]}""",
+            ).getJSONArray("items"),
+            "https://www.instagram.com/p/C1a2B3c4/",
+        )
+        val carousel = Instagram.tallyItems(
+            JSONObject(
+                """
+                {"items":[{"id":"p","carousel_media":[
+                  {"id":"one","display_url":"https://cdn.example/one.jpg"},
+                  {"id":"novideo","is_video":true,"display_url":"https://cdn.example/cover.jpg"},
+                  {"id":"missing"}
+                ]}]}
+                """.trimIndent(),
+            ).getJSONArray("items"),
+            "https://www.instagram.com/p/C1a2B3c4/",
+        )
+
+        assertTrue(single.items.isEmpty())
+        assertTrue(!single.incomplete)
+        assertEquals(1, carousel.items.size)
+        assertTrue(carousel.incomplete)
     }
 }

@@ -152,15 +152,15 @@ object Resolver {
                     val videoPost = Instagram.isInstagram(url) &&
                         (looksLikeVideoPost(rawUrl) || looksLikeVideoPost(url))
                     if (videoPost && api.candidates.none { it.isVideo }) {
-                        val direct = Instagram.resolvePost(activity, url)
-                        val videos = direct.filter { it.isVideo }
+                        val direct = Instagram.resolvePost(activity, url, allowImageFallback = false)
+                        val videos = direct.items.filter { it.isVideo }
                         if (videos.isNotEmpty()) return ResolveOutcome(videos, "Resolved from Instagram")
                         // Saving the cover as a .jpg looks like the video downloaded, but the
                         // gallery gets a still frame. Better to say what happened.
                         return ResolveOutcome(
                             emptyList(),
-                            "Instagram returned only the cover image for that reel. Sign in to " +
-                                "Instagram from Settings, then try the link again.",
+                            direct.note ?: "Instagram returned only the cover image for that " +
+                                "reel. Sign in to Instagram from Settings, then try the link again.",
                         )
                     }
                     val caption = if (choice?.captionLanguage != null) {
@@ -200,8 +200,15 @@ object Resolver {
 
         if (Instagram.isInstagram(url)) {
             if (Instagram.shortcode(url) != null) {
-                val direct = Instagram.resolvePost(activity, url)
-                if (direct.isNotEmpty()) return ResolveOutcome(direct, "Resolved from Instagram")
+                val direct = Instagram.resolvePost(
+                    activity,
+                    url,
+                    allowImageFallback = !looksLikeVideoPost(rawUrl) && !looksLikeVideoPost(url),
+                )
+                if (direct.items.isNotEmpty()) return ResolveOutcome(direct.items, "Resolved from Instagram")
+                // A refused cover or half carousel is a real answer, not a reason to hand the
+                // link to an extractor that would save the same still without saying so.
+                direct.note?.let { return ResolveOutcome(emptyList(), it) }
             }
             val profile = Instagram.usernameFrom(url)
             if (profile != null) {
